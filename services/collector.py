@@ -51,6 +51,7 @@ class CollectorWorker(QThread):
         duration: float,
         output_folder: Path,
         upload_to_aws: bool = True,
+        sample_rate: float = 104,
     ) -> None:
         super().__init__()
         self.hostname = hostname
@@ -58,6 +59,7 @@ class CollectorWorker(QThread):
         self.duration = duration
         self.output_folder = output_folder
         self.upload_to_aws = upload_to_aws
+        self.sample_rate = sample_rate
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -92,11 +94,18 @@ class CollectorWorker(QThread):
             if self._cancelled:
                 return
             
+            # Set sample rate (ODR)
+            try:
+                client.set_odr(self.sample_rate)
+            except Exception as e:
+                # Log but continue - sensor may already be at this rate
+                pass
+            
             # Start data collection
             self.status_changed.emit(
                 self.hostname,
                 CollectionStatus.COLLECTING,
-                f"[{self.hostname}] Collecting for {self.duration:.0f}s..."
+                f"[{self.hostname}] Collecting for {self.duration:.0f}s @ {self.sample_rate}Hz..."
             )
             
             # Callback for download progress
@@ -203,6 +212,7 @@ class CollectorService(QObject):
         duration: float,
         output_folder: Path,
         upload_to_aws: bool = True,
+        sample_rate: float = 104,
     ) -> bool:
         """
         Start a collection cycle for a sensor.
@@ -212,7 +222,7 @@ class CollectorService(QObject):
         if self.is_busy(hostname):
             return False
         
-        worker = CollectorWorker(hostname, ip, duration, output_folder, upload_to_aws)
+        worker = CollectorWorker(hostname, ip, duration, output_folder, upload_to_aws, sample_rate)
         worker.status_changed.connect(self._on_status)
         worker.progress_updated.connect(self._on_progress)
         worker.collection_complete.connect(self._on_complete)

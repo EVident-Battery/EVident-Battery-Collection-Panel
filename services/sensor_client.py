@@ -57,6 +57,13 @@ class SensorClient:
         r.raise_for_status()
         return r.json()
 
+    def set_odr(self, odr: float) -> Dict:
+        """Set the Output Data Rate (sample rate) in Hz."""
+        url = f"{self.base_url}/odr?value={odr}"
+        r = requests.post(url, timeout=(5, 10))
+        r.raise_for_status()
+        return r.json()
+
     def start_collection(
         self,
         duration: float,

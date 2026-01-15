@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer
 from PyQt5.QtGui import QFont
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit
+from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
@@ -432,6 +432,21 @@ class MainWindow(QMainWindow):
         
         row += 1
         
+        # Sample Rate (ODR)
+        settings_grid.addWidget(QLabel("Sample Rate:"), row, 0)
+        odr_layout = QHBoxLayout()
+        self._odr_combo = QComboBox()
+        for rate in SampleRate.all_rates():
+            self._odr_combo.addItem(rate.display_name, rate)
+        self._odr_combo.setCurrentText("104 Hz")
+        self._odr_combo.setMinimumWidth(100)
+        self._odr_combo.currentIndexChanged.connect(self._on_settings_changed)
+        odr_layout.addWidget(self._odr_combo)
+        odr_layout.addStretch()
+        settings_grid.addLayout(odr_layout, row, 1)
+        
+        row += 1
+        
         # Output folder
         settings_grid.addWidget(QLabel("Save Location:"), row, 0)
         folder_layout = QHBoxLayout()
@@ -454,6 +469,28 @@ class MainWindow(QMainWindow):
         settings_grid.addWidget(self._aws_checkbox, row, 0, 1, 2)
         
         layout.addLayout(settings_grid)
+        
+        # Apply to All button
+        apply_layout = QHBoxLayout()
+        apply_layout.addStretch()
+        self._apply_all_btn = QPushButton("📋 Apply to All Sensors")
+        self._apply_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1D4ED8;
+                color: white;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #2563EB;
+            }
+            QPushButton:disabled {
+                background-color: #1E3A5F;
+                color: #64748B;
+            }
+        """)
+        self._apply_all_btn.clicked.connect(self._on_apply_to_all)
+        apply_layout.addWidget(self._apply_all_btn)
+        layout.addLayout(apply_layout)
         
         # Separator
         sep = QFrame()
@@ -574,8 +611,10 @@ class MainWindow(QMainWindow):
         self._duration_spin.setEnabled(enabled)
         self._interval_spin.setEnabled(enabled)
         self._interval_unit_combo.setEnabled(enabled)
+        self._odr_combo.setEnabled(enabled)
         self._browse_btn.setEnabled(enabled)
         self._aws_checkbox.setEnabled(enabled)
+        self._apply_all_btn.setEnabled(enabled)
 
     def _connect_signals(self) -> None:
         """Connect all service signals."""
@@ -683,11 +722,13 @@ class MainWindow(QMainWindow):
         self._duration_spin.blockSignals(True)
         self._interval_spin.blockSignals(True)
         self._interval_unit_combo.blockSignals(True)
+        self._odr_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
         
         self._duration_spin.setValue(config.duration)
         self._interval_spin.setValue(config.interval_value)
         self._interval_unit_combo.setCurrentText(config.interval_unit.value)
+        self._odr_combo.setCurrentText(config.sample_rate.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
         
         if config.output_folder:
@@ -702,6 +743,7 @@ class MainWindow(QMainWindow):
         self._duration_spin.blockSignals(False)
         self._interval_spin.blockSignals(False)
         self._interval_unit_combo.blockSignals(False)
+        self._odr_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
 
     def _update_stats_display(self, config: SensorConfig) -> None:
@@ -730,11 +772,43 @@ class MainWindow(QMainWindow):
         config.duration = self._duration_spin.value()
         config.interval_value = self._interval_spin.value()
         config.interval_unit = IntervalUnit(self._interval_unit_combo.currentText())
+        config.sample_rate = self._odr_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
         
         # Update card
         if self._selected_hostname in self._sensor_cards:
             self._sensor_cards[self._selected_hostname].refresh()
+
+    @pyqtSlot()
+    def _on_apply_to_all(self) -> None:
+        """Apply current settings to all sensors."""
+        if not self._selected_hostname:
+            return
+        
+        source_config = self._sensors.get(self._selected_hostname)
+        if not source_config:
+            return
+        
+        count = 0
+        for hostname, config in self._sensors.items():
+            if hostname == self._selected_hostname:
+                continue
+            
+            config.duration = source_config.duration
+            config.interval_value = source_config.interval_value
+            config.interval_unit = source_config.interval_unit
+            config.sample_rate = source_config.sample_rate
+            config.output_folder = source_config.output_folder
+            config.upload_to_aws = source_config.upload_to_aws
+            
+            # Update card
+            if hostname in self._sensor_cards:
+                self._sensor_cards[hostname].refresh()
+            
+            count += 1
+        
+        if count > 0:
+            self._log_widget.success(f"Applied settings to {count} other sensor(s)")
 
     @pyqtSlot()
     def _on_browse_clicked(self) -> None:
@@ -856,6 +930,7 @@ class MainWindow(QMainWindow):
             duration=config.duration,
             output_folder=config.output_folder,
             upload_to_aws=config.upload_to_aws,
+            sample_rate=config.sample_rate.value,
         )
         
         if not success:

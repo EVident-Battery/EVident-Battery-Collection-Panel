@@ -32,6 +32,40 @@ class IntervalUnit(Enum):
         return [u.value for u in IntervalUnit]
 
 
+class SampleRate(Enum):
+    """Supported ODR (Output Data Rate) values in Hz."""
+    HZ_12_5 = 12.5
+    HZ_26 = 26
+    HZ_52 = 52
+    HZ_104 = 104
+    HZ_208 = 208
+    HZ_416 = 416
+    HZ_833 = 833
+    HZ_1666 = 1666
+    HZ_3333 = 3333
+    HZ_6666 = 6666
+    
+    @property
+    def display_name(self) -> str:
+        """Human-readable name."""
+        if self.value == 12.5:
+            return "12.5 Hz"
+        return f"{int(self.value)} Hz"
+    
+    @staticmethod
+    def all_rates() -> list["SampleRate"]:
+        """Return list of all sample rates."""
+        return list(SampleRate)
+    
+    @staticmethod
+    def from_value(value: float) -> "SampleRate":
+        """Get SampleRate from numeric value."""
+        for rate in SampleRate:
+            if rate.value == value:
+                return rate
+        return SampleRate.HZ_104  # Default
+
+
 class SensorStatus(Enum):
     """Current status of a sensor."""
     IDLE = auto()
@@ -69,6 +103,7 @@ class SensorConfig:
     duration: int = 10  # seconds
     interval_value: int = 5
     interval_unit: IntervalUnit = IntervalUnit.MINUTES
+    sample_rate: SampleRate = SampleRate.HZ_104
     output_folder: Optional[Path] = None
     upload_to_aws: bool = True
     

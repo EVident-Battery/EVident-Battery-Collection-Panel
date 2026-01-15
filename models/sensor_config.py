@@ -66,6 +66,24 @@ class SampleRate(Enum):
         return SampleRate.HZ_104  # Default
 
 
+class AccelRange(Enum):
+    """Supported accelerometer range values in g."""
+    G_2 = 2
+    G_4 = 4
+    G_8 = 8
+    G_16 = 16
+    
+    @property
+    def display_name(self) -> str:
+        """Human-readable name."""
+        return f"±{self.value}g"
+    
+    @staticmethod
+    def all_ranges() -> list["AccelRange"]:
+        """Return list of all accel ranges."""
+        return list(AccelRange)
+
+
 class SensorStatus(Enum):
     """Current status of a sensor."""
     IDLE = auto()
@@ -104,6 +122,7 @@ class SensorConfig:
     interval_value: int = 5
     interval_unit: IntervalUnit = IntervalUnit.MINUTES
     sample_rate: SampleRate = SampleRate.HZ_104
+    accel_range: AccelRange = AccelRange.G_4
     output_folder: Optional[Path] = None
     upload_to_aws: bool = True
     

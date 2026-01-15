@@ -14,7 +14,7 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate
+from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
@@ -313,19 +313,18 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
-        # Right side: Uptime + Controls (two rows)
+        # Right side: Uptime + Controls
         right_section = QVBoxLayout()
         right_section.setSpacing(2)
         
-        # Row 1: "Uptime" label above timer, left-justified
-        uptime_hint = QLabel("Uptime")
-        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold;")
-        uptime_hint.setAlignment(Qt.AlignLeft)
-        right_section.addWidget(uptime_hint)
-        
-        # Row 2: Timer + buttons (inline)
+        # Controls row: Uptime label + timer + buttons (inline)
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(16)
+        
+        # Uptime label (left of counter, smaller font)
+        uptime_hint = QLabel("Uptime:")
+        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold;")
+        controls_layout.addWidget(uptime_hint)
         
         self._uptime_label = QLabel("00:00:00")
         self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
@@ -471,9 +470,10 @@ class MainWindow(QMainWindow):
         
         row += 1
         
-        # Sample Rate (ODR)
+        # Sample Rate (ODR) + Accel Range
         settings_grid.addWidget(QLabel("Sample Rate:"), row, 0)
         odr_layout = QHBoxLayout()
+        odr_layout.setSpacing(8)
         self._odr_combo = QComboBox()
         for rate in SampleRate.all_rates():
             self._odr_combo.addItem(rate.display_name, rate)
@@ -481,6 +481,20 @@ class MainWindow(QMainWindow):
         self._odr_combo.setMinimumWidth(100)
         self._odr_combo.currentIndexChanged.connect(self._on_settings_changed)
         odr_layout.addWidget(self._odr_combo)
+        
+        # Accel Range dropdown
+        accel_label = QLabel("Accel Range:")
+        accel_label.setStyleSheet("color: #CBD5E1;")
+        odr_layout.addWidget(accel_label)
+        
+        self._accel_range_combo = QComboBox()
+        for accel_range in AccelRange.all_ranges():
+            self._accel_range_combo.addItem(accel_range.display_name, accel_range)
+        self._accel_range_combo.setCurrentText("±4g")
+        self._accel_range_combo.setMinimumWidth(80)
+        self._accel_range_combo.currentIndexChanged.connect(self._on_settings_changed)
+        odr_layout.addWidget(self._accel_range_combo)
+        
         odr_layout.addStretch()
         settings_grid.addLayout(odr_layout, row, 1)
         
@@ -651,6 +665,7 @@ class MainWindow(QMainWindow):
         self._interval_spin.setEnabled(enabled)
         self._interval_unit_combo.setEnabled(enabled)
         self._odr_combo.setEnabled(enabled)
+        self._accel_range_combo.setEnabled(enabled)
         self._browse_btn.setEnabled(enabled)
         self._aws_checkbox.setEnabled(enabled)
         self._apply_all_btn.setEnabled(enabled)
@@ -762,12 +777,14 @@ class MainWindow(QMainWindow):
         self._interval_spin.blockSignals(True)
         self._interval_unit_combo.blockSignals(True)
         self._odr_combo.blockSignals(True)
+        self._accel_range_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
         
         self._duration_spin.setValue(config.duration)
         self._interval_spin.setValue(config.interval_value)
         self._interval_unit_combo.setCurrentText(config.interval_unit.value)
         self._odr_combo.setCurrentText(config.sample_rate.display_name)
+        self._accel_range_combo.setCurrentText(config.accel_range.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
         
         if config.output_folder:
@@ -783,6 +800,7 @@ class MainWindow(QMainWindow):
         self._interval_spin.blockSignals(False)
         self._interval_unit_combo.blockSignals(False)
         self._odr_combo.blockSignals(False)
+        self._accel_range_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
 
     def _update_stats_display(self, config: SensorConfig) -> None:
@@ -812,6 +830,7 @@ class MainWindow(QMainWindow):
         config.interval_value = self._interval_spin.value()
         config.interval_unit = IntervalUnit(self._interval_unit_combo.currentText())
         config.sample_rate = self._odr_combo.currentData()
+        config.accel_range = self._accel_range_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
         
         # Update card
@@ -837,6 +856,7 @@ class MainWindow(QMainWindow):
             config.interval_value = source_config.interval_value
             config.interval_unit = source_config.interval_unit
             config.sample_rate = source_config.sample_rate
+            config.accel_range = source_config.accel_range
             config.output_folder = source_config.output_folder
             config.upload_to_aws = source_config.upload_to_aws
             

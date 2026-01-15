@@ -1,0 +1,11 @@
+# Sensor Auto Collector Dependencies
+
+# Qt GUI Framework
+PyQt5>=5.15.0
+
+# HTTP Client
+requests>=2.28.0
+
+# mDNS/Zeroconf for sensor discovery
+zeroconf>=0.80.0
+

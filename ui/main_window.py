@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
-from PyQt5.QtSvg import QSvgWidget
+from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
 from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate
 from services.discovery import DiscoveryController
@@ -286,30 +286,30 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(20, 16, 20, 16)
         
-        layout.addStretch()
-        
-        # Center: Logo + Title
-        center_section = QHBoxLayout()
-        center_section.setSpacing(12)
-        center_section.setAlignment(Qt.AlignCenter)
-        
-        # Logo - preserve aspect ratio
+        # Left: Logo - preserve aspect ratio
         import os
         logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media", "LogoEVident-Vector.svg")
         if os.path.exists(logo_path):
             logo = QSvgWidget(logo_path)
-            # Set maximum height, let width scale with aspect ratio
-            logo.setMaximumHeight(45)
-            logo.setMinimumWidth(100)  # Give it room to be wide
-            center_section.addWidget(logo)
+            logo.setStyleSheet("background: transparent;")
+            # Calculate correct width from SVG's native aspect ratio
+            renderer = QSvgRenderer(logo_path)
+            native_size = renderer.defaultSize()
+            if native_size.height() > 0:
+                aspect_ratio = native_size.width() / native_size.height()
+                # Fill header vertical space (header padding is 16px top/bottom)
+                target_height = 55
+                target_width = int(target_height * aspect_ratio)
+                logo.setFixedSize(target_width, target_height)
+            layout.addWidget(logo)
         
-        # Title
+        layout.addStretch()
+        
+        # Center: Title
         title = QLabel("Evident Battery Device Hub")
         title.setFont(QFont("Segoe UI", 20, QFont.Bold))
         title.setStyleSheet("color: #F1F5F9;")
-        center_section.addWidget(title)
-        
-        layout.addLayout(center_section)
+        layout.addWidget(title)
         
         layout.addStretch()
         

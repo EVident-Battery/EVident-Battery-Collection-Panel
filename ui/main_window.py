@@ -10,8 +10,9 @@ from PyQt5.QtWidgets import (
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
+from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtSvg import QSvgWidget
 
 from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate
 from services.discovery import DiscoveryController
@@ -285,52 +286,75 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(20, 16, 20, 16)
         
+        layout.addStretch()
+        
+        # Center: Logo + Title
+        center_section = QHBoxLayout()
+        center_section.setSpacing(12)
+        center_section.setAlignment(Qt.AlignCenter)
+        
+        # Logo - preserve aspect ratio
+        import os
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media", "LogoEVident-Vector.svg")
+        if os.path.exists(logo_path):
+            logo = QSvgWidget(logo_path)
+            # Set maximum height, let width scale with aspect ratio
+            logo.setMaximumHeight(45)
+            logo.setMinimumWidth(100)  # Give it room to be wide
+            center_section.addWidget(logo)
+        
         # Title
         title = QLabel("Evident Battery Device Hub")
         title.setFont(QFont("Segoe UI", 20, QFont.Bold))
         title.setStyleSheet("color: #F1F5F9;")
-        layout.addWidget(title)
+        center_section.addWidget(title)
+        
+        layout.addLayout(center_section)
         
         layout.addStretch()
         
-        # Uptime counter
+        # Right side: Uptime + Controls
+        right_section = QHBoxLayout()
+        right_section.setSpacing(16)
+        
+        # Uptime counter - bigger and bolder
         uptime_section = QVBoxLayout()
         uptime_section.setSpacing(0)
         uptime_section.setAlignment(Qt.AlignCenter)
         
         self._uptime_label = QLabel("00:00:00")
-        self._uptime_label.setFont(QFont("Consolas", 11))
-        self._uptime_label.setStyleSheet("color: #64748B;")
+        self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
+        self._uptime_label.setStyleSheet("color: #94A3B8;")
         self._uptime_label.setAlignment(Qt.AlignCenter)
         uptime_section.addWidget(self._uptime_label)
         
         uptime_hint = QLabel("Uptime")
-        uptime_hint.setStyleSheet("color: #475569; font-size: 9px;")
+        uptime_hint.setStyleSheet("color: #64748B; font-size: 10px;")
         uptime_hint.setAlignment(Qt.AlignCenter)
         uptime_section.addWidget(uptime_hint)
         
-        layout.addLayout(uptime_section)
-        layout.addSpacing(20)
+        right_section.addLayout(uptime_section)
+        right_section.addSpacing(8)
         
-        # Refresh button
-        self._refresh_btn = QPushButton("↻ Refresh")
+        # Reset button (was Refresh)
+        self._refresh_btn = QPushButton("↻ Reset")
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(self._refresh_btn)
-        
-        layout.addSpacing(12)
+        right_section.addWidget(self._refresh_btn)
         
         # Start All button
         self._start_all_btn = QPushButton("▶  Start All")
         self._start_all_btn.setObjectName("startAllButton")
         self._start_all_btn.clicked.connect(self._on_start_all_clicked)
-        layout.addWidget(self._start_all_btn)
+        right_section.addWidget(self._start_all_btn)
         
         # Stop All button
         self._stop_all_btn = QPushButton("■  Stop All")
         self._stop_all_btn.setObjectName("stopAllButton")
         self._stop_all_btn.setVisible(False)
         self._stop_all_btn.clicked.connect(self._on_stop_all_clicked)
-        layout.addWidget(self._stop_all_btn)
+        right_section.addWidget(self._stop_all_btn)
+        
+        layout.addLayout(right_section)
         
         return header
 

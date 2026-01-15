@@ -277,7 +277,7 @@ class MainWindow(QMainWindow):
         header = QFrame()
         header.setStyleSheet("""
             QFrame {
-                background-color: #1E293B;
+                background-color: #CBD5E1;
                 border-radius: 12px;
                 padding: 16px;
             }
@@ -308,7 +308,7 @@ class MainWindow(QMainWindow):
         # Center: Title
         title = QLabel("Evident Battery Device Hub")
         title.setFont(QFont("Segoe UI", 20, QFont.Bold))
-        title.setStyleSheet("color: #F1F5F9;")
+        title.setStyleSheet("color: #0F172A;")
         layout.addWidget(title)
         
         layout.addStretch()
@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
         
         self._uptime_label = QLabel("00:00:00")
         self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
-        self._uptime_label.setStyleSheet("color: #94A3B8;")
+        self._uptime_label.setStyleSheet("color: #334155;")
         self._uptime_label.setAlignment(Qt.AlignCenter)
         uptime_section.addWidget(self._uptime_label)
         
@@ -338,6 +338,22 @@ class MainWindow(QMainWindow):
         
         # Reset button (was Refresh)
         self._refresh_btn = QPushButton("↻ Reset")
+        self._refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #E2E8F0;
+                color: #1E293B;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #CBD5E1;
+            }
+            QPushButton:pressed {
+                background-color: #94A3B8;
+            }
+        """)
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         right_section.addWidget(self._refresh_btn)
         

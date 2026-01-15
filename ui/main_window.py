@@ -313,28 +313,26 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
-        # Right side: Uptime + Controls
-        right_section = QHBoxLayout()
-        right_section.setSpacing(16)
+        # Right side: Uptime + Controls (two rows)
+        right_section = QVBoxLayout()
+        right_section.setSpacing(2)
         
-        # Uptime counter - bigger and bolder
-        uptime_section = QVBoxLayout()
-        uptime_section.setSpacing(0)
-        uptime_section.setAlignment(Qt.AlignCenter)
+        # Row 1: "Uptime" label above timer, left-justified
+        uptime_hint = QLabel("Uptime")
+        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold;")
+        uptime_hint.setAlignment(Qt.AlignLeft)
+        right_section.addWidget(uptime_hint)
+        
+        # Row 2: Timer + buttons (inline)
+        controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(16)
         
         self._uptime_label = QLabel("00:00:00")
         self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
         self._uptime_label.setStyleSheet("color: #334155;")
-        self._uptime_label.setAlignment(Qt.AlignCenter)
-        uptime_section.addWidget(self._uptime_label)
+        controls_layout.addWidget(self._uptime_label)
         
-        uptime_hint = QLabel("Uptime")
-        uptime_hint.setStyleSheet("color: #64748B; font-size: 10px;")
-        uptime_hint.setAlignment(Qt.AlignCenter)
-        uptime_section.addWidget(uptime_hint)
-        
-        right_section.addLayout(uptime_section)
-        right_section.addSpacing(8)
+        controls_layout.addSpacing(8)
         
         # Reset button (was Refresh)
         self._refresh_btn = QPushButton("↻ Reset")
@@ -355,21 +353,22 @@ class MainWindow(QMainWindow):
             }
         """)
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
-        right_section.addWidget(self._refresh_btn)
+        controls_layout.addWidget(self._refresh_btn)
         
         # Start All button
         self._start_all_btn = QPushButton("▶  Start All")
         self._start_all_btn.setObjectName("startAllButton")
         self._start_all_btn.clicked.connect(self._on_start_all_clicked)
-        right_section.addWidget(self._start_all_btn)
+        controls_layout.addWidget(self._start_all_btn)
         
         # Stop All button
         self._stop_all_btn = QPushButton("■  Stop All")
         self._stop_all_btn.setObjectName("stopAllButton")
         self._stop_all_btn.setVisible(False)
         self._stop_all_btn.clicked.connect(self._on_stop_all_clicked)
-        right_section.addWidget(self._stop_all_btn)
+        controls_layout.addWidget(self._stop_all_btn)
         
+        right_section.addLayout(controls_layout)
         layout.addLayout(right_section)
         
         return header

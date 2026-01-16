@@ -275,28 +275,34 @@ class MainWindow(QMainWindow):
     def _create_header(self) -> QWidget:
         """Create the header with title and global controls."""
         header = QFrame()
-        # Remove setMinimumWidth if you want it to shrink freely,
-        # but keeping it prevents the buttons from crushing into the logo on very small screens.
-        header.setMinimumWidth(800)
         header.setStyleSheet("""
             QFrame {
                 background-color: #CBD5E1;
                 border-radius: 12px;
-                padding: 16px;
+                padding: 0px; 
             }
         """)
 
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(20, 16, 20, 16)
-        # Use layout spacing instead of manual addSpacing(16) calls
-        layout.setSpacing(16)
+        # Main Horizontal Layout for the Header
+        main_layout = QHBoxLayout(header)
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(0)  # We will use a stretch for the gap
 
-        # --- Left: Logo ---
+        # ==========================================================
+        # GROUP 1: LEFT SIDE (Logo + Title)
+        # ==========================================================
+        left_widget = QWidget()
+        left_widget.setStyleSheet("background: transparent;")
+        left_layout = QHBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(20)  # 20px gap between Logo and Title
+
+        # Logo
         import os
         logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "media", "LogoEVident-Vector.svg")
         if os.path.exists(logo_path):
             logo = QSvgWidget(logo_path)
-            logo.setStyleSheet("background: transparent;")
+            # Calculate ratio logic here as before...
             renderer = QSvgRenderer(logo_path)
             native_size = renderer.defaultSize()
             if native_size.height() > 0:
@@ -304,39 +310,52 @@ class MainWindow(QMainWindow):
                 target_height = 55
                 target_width = int(target_height * aspect_ratio)
                 logo.setFixedSize(target_width, target_height)
-            layout.addWidget(logo)
+            left_layout.addWidget(logo)
 
-        # --- Center: Title ---
+        # Title
         title = QLabel("Evident Battery Device Hub")
         title.setFont(QFont("Segoe UI", 20, QFont.Bold))
-        title.setStyleSheet("color: #0F172A; background: transparent;")
-        # FIX: Removed setFixedWidth(320). Let the label calculate its own size.
-        layout.addWidget(title)
+        title.setStyleSheet("color: #0F172A; border: none;")
+        # CRITICAL: This tells the layout "I need this space, do not shrink me"
+        title.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        left_layout.addWidget(title)
 
-        # --- Spacer ---
-        # This pushes everything after it to the right
-        layout.addStretch(1)
+        # Add the left group to main layout
+        main_layout.addWidget(left_widget)
 
-        # --- Right: Controls ---
+        # ==========================================================
+        # THE SPACER (The only thing allowed to shrink)
+        # ==========================================================
+        main_layout.addStretch(1)
+
+        # ==========================================================
+        # GROUP 2: RIGHT SIDE (Uptime + Buttons)
+        # ==========================================================
+        right_widget = QWidget()
+        right_widget.setStyleSheet("background: transparent;")
+        right_layout = QHBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(16)  # Gap between items in the right group
 
         # Uptime Label
         uptime_hint = QLabel("Uptime:")
-        # FIX: Removed setFixedWidth(55)
-        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold; background: transparent;")
-        layout.addWidget(uptime_hint)
+        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold;")
+        # CRITICAL: Lock width to content
+        uptime_hint.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        right_layout.addWidget(uptime_hint)
 
         # Timer Display
         self._uptime_label = QLabel("00:00:00")
         self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
-        self._uptime_label.setStyleSheet("color: #334155; background: transparent;")
-        # FIX: Removed setFixedWidth(95).
-        # If you want to prevent the text jumping when seconds change, use setMinimumWidth instead.
-        self._uptime_label.setMinimumWidth(95)
-        layout.addWidget(self._uptime_label)
+        self._uptime_label.setStyleSheet("color: #334155;")
+        # CRITICAL: Lock width to content
+        self._uptime_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        # Optional: Add a tiny margin to the text so it isn't cramped
+        self._uptime_label.setContentsMargins(5, 0, 5, 0)
+        right_layout.addWidget(self._uptime_label)
 
         # Reset Button
         self._refresh_btn = QPushButton("↻ Reset")
-        # FIX: Changed setFixedWidth to setMinimumWidth for safety
         self._refresh_btn.setMinimumWidth(90)
         self._refresh_btn.setStyleSheet("""
             QPushButton {
@@ -347,30 +366,28 @@ class MainWindow(QMainWindow):
                 padding: 8px 16px;
                 font-weight: bold;
             }
-            QPushButton:hover {
-                background-color: #475569;
-            }
-            QPushButton:pressed {
-                background-color: #1E293B;
-            }
+            QPushButton:hover { background-color: #475569; }
+            QPushButton:pressed { background-color: #1E293B; }
         """)
-        self._refresh_btn.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(self._refresh_btn)
+        right_layout.addWidget(self._refresh_btn)
 
         # Start All Button
         self._start_all_btn = QPushButton("▶  Start All")
         self._start_all_btn.setObjectName("startAllButton")
-        self._start_all_btn.setMinimumWidth(110)  # Changed to MinimumWidth
+        self._start_all_btn.setMinimumWidth(110)
         self._start_all_btn.clicked.connect(self._on_start_all_clicked)
-        layout.addWidget(self._start_all_btn)
+        right_layout.addWidget(self._start_all_btn)
 
         # Stop All Button
         self._stop_all_btn = QPushButton("■  Stop All")
         self._stop_all_btn.setObjectName("stopAllButton")
-        self._stop_all_btn.setMinimumWidth(110)  # Changed to MinimumWidth
+        self._stop_all_btn.setMinimumWidth(110)
         self._stop_all_btn.setVisible(False)
         self._stop_all_btn.clicked.connect(self._on_stop_all_clicked)
-        layout.addWidget(self._stop_all_btn)
+        right_layout.addWidget(self._stop_all_btn)
+
+        # Add the right group to main layout
+        main_layout.addWidget(right_widget)
 
         return header
 

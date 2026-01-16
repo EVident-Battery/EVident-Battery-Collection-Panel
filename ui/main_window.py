@@ -275,11 +275,11 @@ class MainWindow(QMainWindow):
     def _create_header(self) -> QWidget:
         """Create the header with title and global controls."""
         header = QFrame()
+        header.setMinimumHeight(80)
         header.setStyleSheet("""
             QFrame {
                 background-color: #CBD5E1;
                 border-radius: 12px;
-                padding: 0px; 
             }
         """)
 
@@ -369,12 +369,26 @@ class MainWindow(QMainWindow):
             QPushButton:hover { background-color: #475569; }
             QPushButton:pressed { background-color: #1E293B; }
         """)
+        self._refresh_btn.clicked.connect(self._on_refresh_clicked)
         right_layout.addWidget(self._refresh_btn)
 
         # Start All Button
         self._start_all_btn = QPushButton("▶  Start All")
         self._start_all_btn.setObjectName("startAllButton")
         self._start_all_btn.setMinimumWidth(110)
+        self._start_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #059669;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover { background-color: #10B981; }
+            QPushButton:pressed { background-color: #047857; }
+        """)
         self._start_all_btn.clicked.connect(self._on_start_all_clicked)
         right_layout.addWidget(self._start_all_btn)
 
@@ -382,6 +396,19 @@ class MainWindow(QMainWindow):
         self._stop_all_btn = QPushButton("■  Stop All")
         self._stop_all_btn.setObjectName("stopAllButton")
         self._stop_all_btn.setMinimumWidth(110)
+        self._stop_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #DC2626;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover { background-color: #EF4444; }
+            QPushButton:pressed { background-color: #B91C1C; }
+        """)
         self._stop_all_btn.setVisible(False)
         self._stop_all_btn.clicked.connect(self._on_stop_all_clicked)
         right_layout.addWidget(self._stop_all_btn)

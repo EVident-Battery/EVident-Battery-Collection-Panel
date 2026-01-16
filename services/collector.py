@@ -108,15 +108,19 @@ class CollectorWorker(QThread):
                 f"[{self.hostname}] Collecting for {self.duration:.0f}s @ {self.sample_rate}Hz..."
             )
             
-            # Callback for download progress
-            def on_progress(downloaded: int, total: int):
-                self.progress_updated.emit(self.hostname, downloaded, total)
+            # Callback for download progress - emit DOWNLOADING status on first progress
+            download_started = False
             
-            self.status_changed.emit(
-                self.hostname,
-                CollectionStatus.DOWNLOADING,
-                f"[{self.hostname}] Downloading..."
-            )
+            def on_progress(downloaded: int, total: int):
+                nonlocal download_started
+                if not download_started:
+                    download_started = True
+                    self.status_changed.emit(
+                        self.hostname,
+                        CollectionStatus.DOWNLOADING,
+                        f"[{self.hostname}] Downloading..."
+                    )
+                self.progress_updated.emit(self.hostname, downloaded, total)
             
             # Perform collection and download
             file_path = client.start_collection(

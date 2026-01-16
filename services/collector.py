@@ -22,6 +22,7 @@ class CollectionStatus(Enum):
     UPLOADING = auto()
     COMPLETE = auto()
     ERROR = auto()
+    AWS_ERROR = auto()
 
 
 @dataclass
@@ -162,8 +163,8 @@ class CollectorWorker(QThread):
                     result.aws_status = f"Failed: {str(e)}"
                     self.status_changed.emit(
                         self.hostname,
-                        CollectionStatus.UPLOADING,
-                        f"[{self.hostname}] AWS upload failed"
+                        CollectionStatus.AWS_ERROR,
+                        f"[{self.hostname}] AWS upload failed: {str(e)}"
                     )
             
             # Complete

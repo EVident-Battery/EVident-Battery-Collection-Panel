@@ -1086,6 +1086,7 @@ class MainWindow(QMainWindow):
             CollectionStatus.UPLOADING: LogLevel.STATUS,
             CollectionStatus.COMPLETE: LogLevel.SUCCESS,
             CollectionStatus.ERROR: LogLevel.ERROR,
+            CollectionStatus.AWS_ERROR: LogLevel.ERROR,
         }
         level = level_map.get(status, LogLevel.INFO)
         self._log_widget.log(message, level)
@@ -1101,6 +1102,7 @@ class MainWindow(QMainWindow):
                 CollectionStatus.UPLOADING: SensorStatus.UPLOADING,
                 CollectionStatus.COMPLETE: SensorStatus.WAITING,
                 CollectionStatus.ERROR: SensorStatus.ERROR,
+                CollectionStatus.AWS_ERROR: SensorStatus.UPLOADING,
             }
             config.status = status_map.get(status, SensorStatus.IDLE)
             
@@ -1135,6 +1137,8 @@ class MainWindow(QMainWindow):
                 config.stats.collections += 1
                 if result.aws_status and "successful" in result.aws_status.lower():
                     config.stats.uploaded += 1
+                elif result.aws_status and result.aws_status.lower().startswith("failed"):
+                    config.stats.errors += 1
             else:
                 config.stats.errors += 1
             

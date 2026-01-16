@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Evident Battery Device Hub")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1100, 750)
         self.resize(1200, 850)
         self.setStyleSheet(APP_STYLESHEET)
         
@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
     def _create_header(self) -> QWidget:
         """Create the header with title and global controls."""
         header = QFrame()
+        header.setMinimumWidth(950)  # Prevent header from shrinking below content
         header.setStyleSheet("""
             QFrame {
                 background-color: #CBD5E1;
@@ -285,6 +286,7 @@ class MainWindow(QMainWindow):
         
         layout = QHBoxLayout(header)
         layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(0)  # We'll control spacing manually
         
         # Left: Logo - preserve aspect ratio
         import os
@@ -303,72 +305,71 @@ class MainWindow(QMainWindow):
                 logo.setFixedSize(target_width, target_height)
             layout.addWidget(logo)
         
-        layout.addStretch()
+        layout.addSpacing(20)
         
-        # Center: Title
+        # Center: Title - fixed width to prevent any overlap
         title = QLabel("Evident Battery Device Hub")
         title.setFont(QFont("Segoe UI", 20, QFont.Bold))
-        title.setStyleSheet("color: #0F172A;")
+        title.setStyleSheet("color: #0F172A; background: transparent;")
+        title.setFixedWidth(320)
         layout.addWidget(title)
         
-        layout.addStretch()
+        # Flexible spacer between title and controls
+        layout.addStretch(1)
         
-        # Right side: Uptime + Controls
-        right_section = QVBoxLayout()
-        right_section.setSpacing(2)
-        
-        # Controls row: Uptime label + timer + buttons (inline)
-        controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(16)
-        
-        # Uptime label (left of counter, smaller font)
+        # Uptime label (left of counter, smaller font) - fixed width
         uptime_hint = QLabel("Uptime:")
-        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold;")
-        controls_layout.addWidget(uptime_hint)
+        uptime_hint.setFixedWidth(55)
+        uptime_hint.setStyleSheet("color: #64748B; font-size: 13px; font-weight: bold; background: transparent;")
+        layout.addWidget(uptime_hint)
         
+        # Timer display - fixed width
         self._uptime_label = QLabel("00:00:00")
         self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
-        self._uptime_label.setStyleSheet("color: #334155;")
-        controls_layout.addWidget(self._uptime_label)
+        self._uptime_label.setStyleSheet("color: #334155; background: transparent;")
+        self._uptime_label.setFixedWidth(95)
+        layout.addWidget(self._uptime_label)
         
-        controls_layout.addSpacing(8)
+        layout.addSpacing(16)
         
-        # Reset button (was Refresh)
+        # Reset button (was Refresh) - fixed width
         self._refresh_btn = QPushButton("↻ Reset")
+        self._refresh_btn.setFixedWidth(90)
         self._refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: #E2E8F0;
-                color: #1E293B;
-                border: 1px solid #CBD5E1;
+                background-color: #334155;
+                color: #E2E8F0;
+                border: none;
                 border-radius: 6px;
                 padding: 8px 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #CBD5E1;
+                background-color: #475569;
             }
             QPushButton:pressed {
-                background-color: #94A3B8;
+                background-color: #1E293B;
             }
         """)
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
-        controls_layout.addWidget(self._refresh_btn)
+        layout.addWidget(self._refresh_btn)
         
-        # Start All button
+        layout.addSpacing(8)
+        
+        # Start All button - fixed width
         self._start_all_btn = QPushButton("▶  Start All")
         self._start_all_btn.setObjectName("startAllButton")
+        self._start_all_btn.setFixedWidth(110)
         self._start_all_btn.clicked.connect(self._on_start_all_clicked)
-        controls_layout.addWidget(self._start_all_btn)
+        layout.addWidget(self._start_all_btn)
         
-        # Stop All button
+        # Stop All button - fixed width
         self._stop_all_btn = QPushButton("■  Stop All")
         self._stop_all_btn.setObjectName("stopAllButton")
+        self._stop_all_btn.setFixedWidth(110)
         self._stop_all_btn.setVisible(False)
         self._stop_all_btn.clicked.connect(self._on_stop_all_clicked)
-        controls_layout.addWidget(self._stop_all_btn)
-        
-        right_section.addLayout(controls_layout)
-        layout.addLayout(right_section)
+        layout.addWidget(self._stop_all_btn)
         
         return header
 
@@ -409,7 +410,23 @@ class MainWindow(QMainWindow):
     def _create_settings_panel(self) -> QWidget:
         """Create the settings panel for selected sensor."""
         group = QGroupBox("Sensor Settings")
-        layout = QVBoxLayout(group)
+        group.setMinimumHeight(350)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 8, 0, 0)
+        group_layout.setSpacing(0)
+        
+        # Wrap content in scroll area to handle vertical compression
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        # Content widget inside scroll area
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content_widget)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(12)
         
         # Selected sensor info
@@ -422,6 +439,11 @@ class MainWindow(QMainWindow):
         settings_grid = QGridLayout()
         settings_grid.setSpacing(10)
         settings_grid.setColumnStretch(1, 1)
+        settings_grid.setColumnMinimumWidth(0, 100)
+        settings_grid.setColumnMinimumWidth(1, 200)
+        # Set minimum row heights to prevent vertical overlap
+        for i in range(7):
+            settings_grid.setRowMinimumHeight(i, 32)
         
         row = 0
         
@@ -470,7 +492,7 @@ class MainWindow(QMainWindow):
         
         row += 1
         
-        # Sample Rate (ODR) + Accel Range
+        # Sample Rate (ODR)
         settings_grid.addWidget(QLabel("Sample Rate:"), row, 0)
         odr_layout = QHBoxLayout()
         odr_layout.setSpacing(8)
@@ -478,25 +500,27 @@ class MainWindow(QMainWindow):
         for rate in SampleRate.all_rates():
             self._odr_combo.addItem(rate.display_name, rate)
         self._odr_combo.setCurrentText("104 Hz")
-        self._odr_combo.setMinimumWidth(100)
+        self._odr_combo.setMinimumWidth(120)
         self._odr_combo.currentIndexChanged.connect(self._on_settings_changed)
         odr_layout.addWidget(self._odr_combo)
+        odr_layout.addStretch()
+        settings_grid.addLayout(odr_layout, row, 1)
         
-        # Accel Range dropdown
-        accel_label = QLabel("Accel Range:")
-        accel_label.setStyleSheet("color: #CBD5E1;")
-        odr_layout.addWidget(accel_label)
+        row += 1
         
+        # Accel Range (separate row)
+        settings_grid.addWidget(QLabel("Accel Range:"), row, 0)
+        accel_layout = QHBoxLayout()
+        accel_layout.setSpacing(8)
         self._accel_range_combo = QComboBox()
         for accel_range in AccelRange.all_ranges():
             self._accel_range_combo.addItem(accel_range.display_name, accel_range)
         self._accel_range_combo.setCurrentText("±4g")
-        self._accel_range_combo.setMinimumWidth(80)
+        self._accel_range_combo.setMinimumWidth(100)
         self._accel_range_combo.currentIndexChanged.connect(self._on_settings_changed)
-        odr_layout.addWidget(self._accel_range_combo)
-        
-        odr_layout.addStretch()
-        settings_grid.addLayout(odr_layout, row, 1)
+        accel_layout.addWidget(self._accel_range_combo)
+        accel_layout.addStretch()
+        settings_grid.addLayout(accel_layout, row, 1)
         
         row += 1
         
@@ -506,6 +530,7 @@ class MainWindow(QMainWindow):
         self._folder_edit = QLineEdit()
         self._folder_edit.setPlaceholderText("Select a folder...")
         self._folder_edit.setReadOnly(True)
+        self._folder_edit.setMinimumWidth(200)
         folder_layout.addWidget(self._folder_edit, 1)
         
         self._browse_btn = QPushButton("Browse...")
@@ -587,6 +612,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(stats_frame)
         
         layout.addStretch()
+        
+        # Add content widget to scroll area, scroll area to group
+        scroll.setWidget(content_widget)
+        group_layout.addWidget(scroll)
         
         # Initially disable until sensor selected
         self._set_settings_enabled(False)

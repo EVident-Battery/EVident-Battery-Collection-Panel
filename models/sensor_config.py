@@ -93,6 +93,12 @@ class StopMode(Enum):
     AT_TIME = "at_time"
 
 
+class DiscoverySource(Enum):
+    """How the sensor was discovered."""
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
+
+
 class SensorStatus(Enum):
     """Current status of a sensor."""
     IDLE = auto()
@@ -122,7 +128,10 @@ class SensorConfig:
     # Identity
     hostname: str
     ip: str
-    
+
+    # Discovery source
+    discovery_source: DiscoverySource = DiscoverySource.AUTOMATIC
+
     # Battery (updated periodically)
     battery: float = -1.0
     

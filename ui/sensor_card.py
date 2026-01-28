@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 
-from models.sensor_config import SensorConfig, SensorStatus
+from models.sensor_config import SensorConfig, SensorStatus, DiscoverySource
 
 
 class SensorCardWidget(QFrame):
@@ -65,10 +65,21 @@ class SensorCardWidget(QFrame):
         
         layout.addLayout(top_row)
         
-        # IP address
+        # IP address row (with optional manual badge)
+        ip_row = QHBoxLayout()
+        ip_row.setSpacing(6)
+
         self._ip_label = QLabel(self.config.ip)
         self._ip_label.setStyleSheet("color: #64748B; font-size: 10px;")
-        layout.addWidget(self._ip_label)
+        ip_row.addWidget(self._ip_label)
+
+        self._manual_badge = QLabel("(manual)")
+        self._manual_badge.setStyleSheet("color: #F59E0B; font-size: 9px; font-weight: bold;")
+        self._manual_badge.setVisible(self.config.discovery_source == DiscoverySource.MANUAL)
+        ip_row.addWidget(self._manual_badge)
+
+        ip_row.addStretch()
+        layout.addLayout(ip_row)
         
         # Bottom row: Countdown + Controls
         bottom_row = QHBoxLayout()
@@ -203,7 +214,10 @@ class SensorCardWidget(QFrame):
     def _update_display(self) -> None:
         """Update all display elements from config."""
         self._update_battery_display()
-        
+
+        # Manual badge visibility
+        self._manual_badge.setVisible(self.config.discovery_source == DiscoverySource.MANUAL)
+
         # Countdown
         if self.config.is_running:
             self._countdown_label.setText(f"⏱ {self.config.format_countdown()}")

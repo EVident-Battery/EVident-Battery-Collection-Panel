@@ -15,10 +15,11 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StopMode
+from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StopMode, DiscoverySource
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
+from services.manual_resolver import ManualResolverWorker
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 
@@ -193,26 +194,32 @@ QSplitter::handle:vertical {
 
 class MainWindow(QMainWindow):
     """Main application window - Evident Battery Device Hub."""
-    
+
     def __init__(self) -> None:
         super().__init__()
-        
+
         # Sensor configs and cards
         self._sensors: Dict[str, SensorConfig] = {}
         self._sensor_cards: Dict[str, SensorCardWidget] = {}
         self._selected_hostname: Optional[str] = None
-        
+
+        # Manual sensors tracking (separate from auto-discovered)
+        self._manual_sensors: Dict[str, SensorConfig] = {}
+
+        # Manual resolver thread
+        self._resolver_thread: Optional[ManualResolverWorker] = None
+
         # Services
         self._discovery = DiscoveryController()
         self._collector = CollectorService()
         self._scheduler = MultiSensorScheduler()
-        
+
         # Uptime tracking
         self._start_time = QTime.currentTime()
         self._uptime_timer = QTimer(self)
         self._uptime_timer.setInterval(1000)
         self._uptime_timer.timeout.connect(self._update_uptime)
-        
+
         self._setup_ui()
         self._connect_signals()
         self._start_discovery()
@@ -425,33 +432,174 @@ class MainWindow(QMainWindow):
         group.setMinimumWidth(280)
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
-        
+
+        # Warning banner (hidden by default)
+        self._warning_banner = self._create_warning_banner()
+        layout.addWidget(self._warning_banner)
+
+        # Discovery mode toggle
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(16)
+
+        self._auto_radio = QRadioButton("Automatic")
+        self._auto_radio.setChecked(True)
+        self._auto_radio.setStyleSheet("color: #CBD5E1;")
+        self._auto_radio.toggled.connect(self._on_discovery_mode_changed)
+        mode_layout.addWidget(self._auto_radio)
+
+        self._manual_radio = QRadioButton("Manual")
+        self._manual_radio.setStyleSheet("color: #CBD5E1;")
+        mode_layout.addWidget(self._manual_radio)
+
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
+
+        # Manual entry widget (hidden by default)
+        self._manual_entry_widget = self._create_manual_entry_widget()
+        self._manual_entry_widget.setVisible(False)
+        layout.addWidget(self._manual_entry_widget)
+
         # Scroll area for sensor cards
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
+
         # Container for cards
         self._cards_container = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_container)
         self._cards_layout.setContentsMargins(4, 4, 4, 4)
         self._cards_layout.setSpacing(8)
         self._cards_layout.addStretch()
-        
+
         scroll.setWidget(self._cards_container)
         layout.addWidget(scroll, 1)
-        
+
         # Blink button
         btn_layout = QHBoxLayout()
-        self._blink_btn = QPushButton("💡 Blink Selected")
+        self._blink_btn = QPushButton("Blink Selected")
         self._blink_btn.setEnabled(False)
         self._blink_btn.clicked.connect(self._on_blink_clicked)
         btn_layout.addWidget(self._blink_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-        
+
         return group
+
+    def _create_warning_banner(self) -> QWidget:
+        """Create the warning banner for discovery timeout."""
+        banner = QFrame()
+        banner.setStyleSheet("""
+            QFrame {
+                background-color: #78350F;
+                border: 1px solid #F59E0B;
+                border-radius: 6px;
+            }
+        """)
+        banner.setVisible(False)
+
+        banner_layout = QHBoxLayout(banner)
+        banner_layout.setContentsMargins(10, 8, 10, 8)
+        banner_layout.setSpacing(8)
+
+        # Warning icon and message
+        icon = QLabel("Warning:")
+        icon.setStyleSheet("color: #FCD34D; font-weight: bold;")
+        banner_layout.addWidget(icon)
+
+        message = QLabel(
+            "No sensors discovered. Windows Firewall may be blocking mDNS discovery. "
+            "Allow this app on private networks, or use Manual mode below."
+        )
+        message.setStyleSheet("color: #FEF3C7; font-size: 11px;")
+        message.setWordWrap(True)
+        banner_layout.addWidget(message, 1)
+
+        # Dismiss button
+        dismiss_btn = QPushButton("X")
+        dismiss_btn.setFixedSize(20, 20)
+        dismiss_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #FCD34D;
+                border: none;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                color: #FEF3C7;
+            }
+        """)
+        dismiss_btn.clicked.connect(lambda: banner.setVisible(False))
+        banner_layout.addWidget(dismiss_btn)
+
+        return banner
+
+    def _create_manual_entry_widget(self) -> QWidget:
+        """Create the manual sensor entry widget."""
+        widget = QFrame()
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: #1E3A5F;
+                border: 1px solid #334155;
+                border-radius: 6px;
+            }
+        """)
+
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+
+        # Entry row
+        entry_row = QHBoxLayout()
+        entry_row.setSpacing(8)
+
+        self._manual_entry = QLineEdit()
+        self._manual_entry.setPlaceholderText("EVBS_1234 or 192.168.1.x")
+        self._manual_entry.setStyleSheet("""
+            QLineEdit {
+                background-color: #0F172A;
+                color: #E2E8F0;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 6px 10px;
+            }
+            QLineEdit:focus {
+                border-color: #3B82F6;
+            }
+        """)
+        self._manual_entry.returnPressed.connect(self._on_manual_add_clicked)
+        entry_row.addWidget(self._manual_entry, 1)
+
+        self._manual_add_btn = QPushButton("+")
+        self._manual_add_btn.setFixedSize(32, 32)
+        self._manual_add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #059669;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #10B981;
+            }
+            QPushButton:disabled {
+                background-color: #334155;
+                color: #64748B;
+            }
+        """)
+        self._manual_add_btn.clicked.connect(self._on_manual_add_clicked)
+        entry_row.addWidget(self._manual_add_btn)
+
+        layout.addLayout(entry_row)
+
+        # Helper text
+        helper = QLabel("Enter sensor name or IP address")
+        helper.setStyleSheet("color: #64748B; font-size: 10px;")
+        layout.addWidget(helper)
+
+        return widget
 
     def _create_settings_panel(self) -> QWidget:
         """Create the settings panel for selected sensor."""
@@ -810,12 +958,13 @@ class MainWindow(QMainWindow):
         # Discovery
         self._discovery.signals.device_found.connect(self._on_device_found)
         self._discovery.signals.device_lost.connect(self._on_device_lost)
-        
+        self._discovery.signals.discovery_timeout.connect(self._on_discovery_timeout)
+
         # Collector
         self._collector.status_changed.connect(self._on_collection_status)
         self._collector.progress_updated.connect(self._on_collection_progress)
         self._collector.collection_complete.connect(self._on_collection_complete)
-        
+
         # Multi-scheduler
         self._scheduler.trigger_collection.connect(self._on_trigger_collection)
         self._scheduler.countdown_tick.connect(self._on_countdown_tick)
@@ -830,7 +979,13 @@ class MainWindow(QMainWindow):
         """Handle discovered sensor."""
         if hostname in self._sensors:
             return
-        
+
+        # Notify discovery controller to cancel timeout
+        self._discovery.notify_device_found()
+
+        # Hide warning banner when device found
+        self._warning_banner.setVisible(False)
+
         # Fetch battery
         battery = -1
         try:
@@ -840,23 +995,23 @@ class MainWindow(QMainWindow):
             battery = status.get("Battery SOC", -1)
         except Exception:
             pass
-        
+
         # Create config
         config = SensorConfig(hostname=hostname, ip=ip, battery=battery)
         self._sensors[hostname] = config
         self._scheduler.register_sensor(config)
-        
+
         # Create card
         card = SensorCardWidget(config)
         card.selected.connect(self._on_sensor_card_selected)
         card.play_clicked.connect(self._on_sensor_play)
         card.pause_clicked.connect(self._on_sensor_pause)
-        
+
         self._sensor_cards[hostname] = card
-        
+
         # Insert before stretch
         self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
-        
+
         if battery >= 0:
             self._log_widget.success(f"Discovered: {hostname} ({ip}) - Battery: {battery:.0f}%")
         else:
@@ -1086,10 +1241,16 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_refresh_clicked(self) -> None:
         """Refresh sensor discovery."""
-        # Clear all
+        # Clear all sensors (including manual)
         for hostname in list(self._sensors.keys()):
             self._on_device_lost(hostname)
-        
+
+        # Clear manual sensors tracking
+        self._manual_sensors.clear()
+
+        # Hide warning banner on refresh
+        self._warning_banner.setVisible(False)
+
         self._discovery.stop()
         self._discovery.start()
         self._log_widget.info("Refreshing sensor discovery...")
@@ -1099,7 +1260,7 @@ class MainWindow(QMainWindow):
         """Blink selected sensor."""
         if not self._selected_hostname:
             return
-        
+
         config = self._sensors.get(self._selected_hostname)
         if config:
             from services.sensor_client import SensorClient
@@ -1109,6 +1270,110 @@ class MainWindow(QMainWindow):
                 self._log_widget.info(f"Blinking {config.hostname}...")
             except Exception as e:
                 self._log_widget.error(f"Failed to blink: {e}")
+
+    @pyqtSlot()
+    def _on_discovery_timeout(self) -> None:
+        """Handle discovery timeout - show warning banner."""
+        # Only show if no sensors have been discovered
+        if not self._sensors:
+            self._warning_banner.setVisible(True)
+            self._log_widget.warning(
+                "No sensors discovered after 15 seconds. Check firewall settings or use Manual mode."
+            )
+
+    @pyqtSlot(bool)
+    def _on_discovery_mode_changed(self, checked: bool) -> None:
+        """Handle discovery mode toggle."""
+        # Only act on the automatic radio (to avoid double-firing)
+        is_manual = self._manual_radio.isChecked()
+        self._manual_entry_widget.setVisible(is_manual)
+
+        if is_manual:
+            self._log_widget.info("Switched to Manual mode - enter sensor IP or hostname")
+        else:
+            self._log_widget.info("Switched to Automatic mode - mDNS discovery active")
+
+    @pyqtSlot()
+    def _on_manual_add_clicked(self) -> None:
+        """Handle manual sensor add button click."""
+        entry = self._manual_entry.text().strip()
+        if not entry:
+            return
+
+        # Disable button while resolving
+        self._manual_add_btn.setEnabled(False)
+        self._manual_entry.setEnabled(False)
+
+        # Start resolver thread
+        self._resolver_thread = ManualResolverWorker(entry)
+        self._resolver_thread.resolved.connect(self._on_manual_resolved)
+        self._resolver_thread.failed.connect(self._on_manual_failed)
+        self._resolver_thread.finished.connect(self._on_resolver_finished)
+        self._resolver_thread.start()
+
+    @pyqtSlot(str, str)
+    def _on_manual_resolved(self, hostname: str, ip: str) -> None:
+        """Handle successful manual resolution."""
+        # Check if already exists
+        if hostname in self._sensors:
+            self._log_widget.warning(f"Sensor {hostname} already in list")
+            return
+
+        # Hide warning banner
+        self._warning_banner.setVisible(False)
+
+        # Fetch battery
+        battery = -1
+        try:
+            from services.sensor_client import SensorClient
+            client = SensorClient(ip)
+            status = client.get_status()
+            battery = status.get("Battery SOC", -1)
+        except Exception:
+            pass
+
+        # Create config with MANUAL source
+        config = SensorConfig(
+            hostname=hostname,
+            ip=ip,
+            battery=battery,
+            discovery_source=DiscoverySource.MANUAL
+        )
+        self._sensors[hostname] = config
+        self._manual_sensors[hostname] = config
+        self._scheduler.register_sensor(config)
+
+        # Create card
+        card = SensorCardWidget(config)
+        card.selected.connect(self._on_sensor_card_selected)
+        card.play_clicked.connect(self._on_sensor_play)
+        card.pause_clicked.connect(self._on_sensor_pause)
+
+        self._sensor_cards[hostname] = card
+
+        # Insert before stretch
+        self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
+
+        # Clear entry field
+        self._manual_entry.clear()
+
+        if battery >= 0:
+            self._log_widget.success(f"Added manually: {hostname} ({ip}) - Battery: {battery:.0f}%")
+        else:
+            self._log_widget.success(f"Added manually: {hostname} ({ip})")
+
+    @pyqtSlot(str)
+    def _on_manual_failed(self, error: str) -> None:
+        """Handle manual resolution failure."""
+        self._log_widget.error(error)
+
+    @pyqtSlot()
+    def _on_resolver_finished(self) -> None:
+        """Handle resolver thread completion."""
+        self._manual_add_btn.setEnabled(True)
+        self._manual_entry.setEnabled(True)
+        self._manual_entry.setFocus()
+        self._resolver_thread = None
 
     def _check_memory_warning(self, configs: list) -> bool:
         """Show warning if any config exceeds 16MB. Returns True to proceed."""

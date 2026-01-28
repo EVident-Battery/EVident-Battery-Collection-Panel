@@ -6,6 +6,8 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Optional
 
+from PyQt5.QtCore import QTime
+
 
 class IntervalUnit(Enum):
     """Time units for collection interval."""
@@ -84,6 +86,13 @@ class AccelRange(Enum):
         return list(AccelRange)
 
 
+class StopMode(Enum):
+    """Stop mode options for collection scheduling."""
+    CONTINUOUS = "continuous"
+    AFTER_COUNT = "after_count"
+    AT_TIME = "at_time"
+
+
 class SensorStatus(Enum):
     """Current status of a sensor."""
     IDLE = auto()
@@ -125,7 +134,13 @@ class SensorConfig:
     accel_range: AccelRange = AccelRange.G_4
     output_folder: Optional[Path] = None
     upload_to_aws: bool = True
-    
+
+    # Stop mode settings
+    stop_mode: StopMode = StopMode.CONTINUOUS
+    repetition_count: int = 1        # Used when stop_mode == AFTER_COUNT
+    stop_at_time: Optional[QTime] = None  # Used when stop_mode == AT_TIME
+    remaining_repetitions: int = 0   # Runtime tracking for count mode
+
     # Runtime state
     status: SensorStatus = SensorStatus.IDLE
     is_running: bool = False
@@ -141,8 +156,8 @@ class SensorConfig:
     def interval_seconds(self) -> int:
         """Get the interval in seconds."""
         total = self.interval_unit.to_seconds(self.interval_value)
-        # Enforce minimum of 30 seconds
-        return max(30, total)
+        # Enforce minimum of 1 second
+        return max(1, total)
     
     @property
     def is_configured(self) -> bool:
@@ -182,8 +197,39 @@ class SensorConfig:
         hours = total // 3600
         mins = (total % 3600) // 60
         secs = total % 60
-        
+
         if hours > 0:
             return f"{hours:02d}:{mins:02d}:{secs:02d}"
         return f"{mins:02d}:{secs:02d}"
+
+    def reset_repetitions(self) -> None:
+        """Reset remaining repetitions to the configured count."""
+        self.remaining_repetitions = self.repetition_count
+
+    def should_stop_after_collection(self) -> bool:
+        """Check if sensor should stop after current collection completes."""
+        if self.stop_mode == StopMode.CONTINUOUS:
+            return False
+        elif self.stop_mode == StopMode.AFTER_COUNT:
+            self.remaining_repetitions -= 1
+            return self.remaining_repetitions <= 0
+        elif self.stop_mode == StopMode.AT_TIME:
+            if self.stop_at_time:
+                return QTime.currentTime() >= self.stop_at_time
+        return False
+
+    def calculate_memory_bytes(self) -> int:
+        """Calculate estimated memory usage in bytes."""
+        return int(self.sample_rate.value * self.duration * 7)
+
+    def exceeds_memory_limit(self, limit_bytes: int = 16_777_216) -> bool:
+        """Check if config exceeds memory limit (default 16MB)."""
+        return self.calculate_memory_bytes() >= limit_bytes
+
+    def format_memory_size(self) -> str:
+        """Format calculated memory size for display."""
+        bytes_val = self.calculate_memory_bytes()
+        if bytes_val >= 1_048_576:
+            return f"{bytes_val / 1_048_576:.2f} MB"
+        return f"{bytes_val} bytes"
 

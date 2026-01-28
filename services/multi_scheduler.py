@@ -67,9 +67,10 @@ class MultiSensorScheduler(QObject):
         config = self._sensors.get(hostname)
         if not config or not config.is_configured:
             return False
-        
+
         config.is_running = True
         config.status = SensorStatus.WAITING
+        config.reset_repetitions()
         
         if run_immediately:
             # Trigger immediately, countdown starts after collection
@@ -125,6 +126,11 @@ class MultiSensorScheduler(QObject):
         self._collecting[hostname] = False
         config = self._sensors.get(hostname)
         if config and config.is_running:
+            # Check if we should stop based on stop mode
+            if config.should_stop_after_collection():
+                self.stop_sensor(hostname)
+                return
+
             config.status = SensorStatus.WAITING
             config.reset_countdown()
     

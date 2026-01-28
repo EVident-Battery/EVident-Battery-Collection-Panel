@@ -8,13 +8,14 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QScrollArea, QSplitter, QProgressBar,
-    QGroupBox, QGridLayout, QCheckBox, QSizePolicy
+    QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
+    QRadioButton, QTimeEdit, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange
+from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StopMode
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
@@ -528,15 +529,65 @@ class MainWindow(QMainWindow):
         interval_layout.addWidget(self._interval_unit_combo)
         
         # Minimum indicator
-        self._interval_hint = QLabel("(min 30s)")
+        self._interval_hint = QLabel("(min 1s)")
         self._interval_hint.setStyleSheet("color: #64748B; font-size: 10px;")
         interval_layout.addWidget(self._interval_hint)
         
         interval_layout.addStretch()
         settings_grid.addLayout(interval_layout, row, 1)
-        
+
         row += 1
-        
+
+        # Stop Mode section (right after Interval)
+        settings_grid.addWidget(QLabel("Stop Mode:"), row, 0, Qt.AlignTop)
+        stop_mode_layout = QVBoxLayout()
+        stop_mode_layout.setSpacing(6)
+
+        # Option 1: Continuous
+        self._continuous_radio = QRadioButton("Continuous")
+        self._continuous_radio.setChecked(True)
+        self._continuous_radio.toggled.connect(self._on_stop_mode_changed)
+        stop_mode_layout.addWidget(self._continuous_radio)
+
+        # Option 2: After N runs
+        count_layout = QHBoxLayout()
+        self._count_radio = QRadioButton("After")
+        self._count_radio.toggled.connect(self._on_stop_mode_changed)
+        count_layout.addWidget(self._count_radio)
+
+        self._count_spin = QSpinBox()
+        self._count_spin.setRange(1, 9999)
+        self._count_spin.setValue(1)
+        self._count_spin.setMinimumWidth(70)
+        self._count_spin.valueChanged.connect(self._on_settings_changed)
+        count_layout.addWidget(self._count_spin)
+        count_layout.addWidget(QLabel("runs"))
+        count_layout.addStretch()
+        stop_mode_layout.addLayout(count_layout)
+
+        # Option 3: At specific time
+        time_layout = QHBoxLayout()
+        self._time_radio = QRadioButton("At")
+        self._time_radio.toggled.connect(self._on_stop_mode_changed)
+        time_layout.addWidget(self._time_radio)
+
+        self._stop_time_edit = QTimeEdit()
+        self._stop_time_edit.setDisplayFormat("hh:mm AP")
+        self._stop_time_edit.setTime(QTime(17, 0))  # Default 5:00 PM
+        self._stop_time_edit.setStyleSheet("background-color: #1E3A5F; color: #64748B;")
+        self._stop_time_edit.timeChanged.connect(self._on_settings_changed)
+        time_layout.addWidget(self._stop_time_edit)
+        time_layout.addStretch()
+        stop_mode_layout.addLayout(time_layout)
+
+        settings_grid.addLayout(stop_mode_layout, row, 1)
+
+        # Initialize stop mode controls state
+        self._count_spin.setEnabled(False)
+        self._stop_time_edit.setEnabled(False)
+
+        row += 1
+
         # Sample Rate (ODR)
         settings_grid.addWidget(QLabel("Sample Rate:"), row, 0)
         odr_layout = QHBoxLayout()
@@ -550,9 +601,9 @@ class MainWindow(QMainWindow):
         odr_layout.addWidget(self._odr_combo)
         odr_layout.addStretch()
         settings_grid.addLayout(odr_layout, row, 1)
-        
+
         row += 1
-        
+
         # Accel Range (separate row)
         settings_grid.addWidget(QLabel("Accel Range:"), row, 0)
         accel_layout = QHBoxLayout()
@@ -566,9 +617,9 @@ class MainWindow(QMainWindow):
         accel_layout.addWidget(self._accel_range_combo)
         accel_layout.addStretch()
         settings_grid.addLayout(accel_layout, row, 1)
-        
+
         row += 1
-        
+
         # Output folder
         settings_grid.addWidget(QLabel("Save Location:"), row, 0)
         folder_layout = QHBoxLayout()
@@ -577,20 +628,20 @@ class MainWindow(QMainWindow):
         self._folder_edit.setReadOnly(True)
         self._folder_edit.setMinimumWidth(200)
         folder_layout.addWidget(self._folder_edit, 1)
-        
+
         self._browse_btn = QPushButton("Browse...")
         self._browse_btn.clicked.connect(self._on_browse_clicked)
         folder_layout.addWidget(self._browse_btn)
         settings_grid.addLayout(folder_layout, row, 1)
-        
+
         row += 1
-        
+
         # AWS upload
         self._aws_checkbox = QCheckBox("Upload to AWS after each collection")
         self._aws_checkbox.setChecked(True)
         self._aws_checkbox.stateChanged.connect(self._on_settings_changed)
         settings_grid.addWidget(self._aws_checkbox, row, 0, 1, 2)
-        
+
         layout.addLayout(settings_grid)
         
         # Apply to All button
@@ -743,6 +794,16 @@ class MainWindow(QMainWindow):
         self._browse_btn.setEnabled(enabled)
         self._aws_checkbox.setEnabled(enabled)
         self._apply_all_btn.setEnabled(enabled)
+        # Stop mode controls
+        self._continuous_radio.setEnabled(enabled)
+        self._count_radio.setEnabled(enabled)
+        self._time_radio.setEnabled(enabled)
+        if enabled:
+            # Update enabled state based on radio selection
+            self._on_stop_mode_changed()
+        else:
+            self._count_spin.setEnabled(False)
+            self._stop_time_edit.setEnabled(False)
 
     def _connect_signals(self) -> None:
         """Connect all service signals."""
@@ -853,22 +914,39 @@ class MainWindow(QMainWindow):
         self._odr_combo.blockSignals(True)
         self._accel_range_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
-        
+        self._continuous_radio.blockSignals(True)
+        self._count_radio.blockSignals(True)
+        self._time_radio.blockSignals(True)
+        self._count_spin.blockSignals(True)
+        self._stop_time_edit.blockSignals(True)
+
         self._duration_spin.setValue(config.duration)
         self._interval_spin.setValue(config.interval_value)
         self._interval_unit_combo.setCurrentText(config.interval_unit.value)
         self._odr_combo.setCurrentText(config.sample_rate.display_name)
         self._accel_range_combo.setCurrentText(config.accel_range.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
-        
+
+        # Load stop mode
+        if config.stop_mode == StopMode.CONTINUOUS:
+            self._continuous_radio.setChecked(True)
+        elif config.stop_mode == StopMode.AFTER_COUNT:
+            self._count_radio.setChecked(True)
+        elif config.stop_mode == StopMode.AT_TIME:
+            self._time_radio.setChecked(True)
+
+        self._count_spin.setValue(config.repetition_count)
+        if config.stop_at_time:
+            self._stop_time_edit.setTime(config.stop_at_time)
+
         if config.output_folder:
             self._folder_edit.setText(str(config.output_folder))
         else:
             self._folder_edit.setText("")
-        
+
         # Update stats
         self._update_stats_display(config)
-        
+
         # Unblock signals
         self._duration_spin.blockSignals(False)
         self._interval_spin.blockSignals(False)
@@ -876,6 +954,14 @@ class MainWindow(QMainWindow):
         self._odr_combo.blockSignals(False)
         self._accel_range_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
+        self._continuous_radio.blockSignals(False)
+        self._count_radio.blockSignals(False)
+        self._time_radio.blockSignals(False)
+        self._count_spin.blockSignals(False)
+        self._stop_time_edit.blockSignals(False)
+
+        # Update stop mode control states
+        self._on_stop_mode_changed()
 
     def _update_stats_display(self, config: SensorConfig) -> None:
         """Update statistics display for a sensor."""
@@ -891,22 +977,55 @@ class MainWindow(QMainWindow):
             errors_lbl.setText(str(config.stats.errors))
 
     @pyqtSlot()
+    def _on_stop_mode_changed(self) -> None:
+        """Update enabled state of stop mode controls based on selection."""
+        count_enabled = self._count_radio.isChecked()
+        time_enabled = self._time_radio.isChecked()
+
+        # Dim/enable the inputs based on which radio is selected
+        self._count_spin.setEnabled(count_enabled)
+        self._stop_time_edit.setEnabled(time_enabled)
+
+        # Style dimmed controls
+        dim_style = "color: #64748B;"
+        normal_style = ""
+        # Time edit styles with light blue background
+        time_dim_style = "background-color: #1E3A5F; color: #64748B;"
+        time_normal_style = "background-color: #1E3A5F; color: #E2E8F0;"
+
+        self._count_spin.setStyleSheet(dim_style if not count_enabled else normal_style)
+        self._stop_time_edit.setStyleSheet(time_dim_style if not time_enabled else time_normal_style)
+
+        self._on_settings_changed()
+
+    @pyqtSlot()
     def _on_settings_changed(self) -> None:
         """Handle settings change - save to selected config."""
         if not self._selected_hostname:
             return
-        
+
         config = self._sensors.get(self._selected_hostname)
         if not config:
             return
-        
+
         config.duration = self._duration_spin.value()
         config.interval_value = self._interval_spin.value()
         config.interval_unit = IntervalUnit(self._interval_unit_combo.currentText())
         config.sample_rate = self._odr_combo.currentData()
         config.accel_range = self._accel_range_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
-        
+
+        # Save stop mode
+        if self._continuous_radio.isChecked():
+            config.stop_mode = StopMode.CONTINUOUS
+        elif self._count_radio.isChecked():
+            config.stop_mode = StopMode.AFTER_COUNT
+        elif self._time_radio.isChecked():
+            config.stop_mode = StopMode.AT_TIME
+
+        config.repetition_count = self._count_spin.value()
+        config.stop_at_time = self._stop_time_edit.time()
+
         # Update card
         if self._selected_hostname in self._sensor_cards:
             self._sensor_cards[self._selected_hostname].refresh()
@@ -916,16 +1035,16 @@ class MainWindow(QMainWindow):
         """Apply current settings to all sensors."""
         if not self._selected_hostname:
             return
-        
+
         source_config = self._sensors.get(self._selected_hostname)
         if not source_config:
             return
-        
+
         count = 0
         for hostname, config in self._sensors.items():
             if hostname == self._selected_hostname:
                 continue
-            
+
             config.duration = source_config.duration
             config.interval_value = source_config.interval_value
             config.interval_unit = source_config.interval_unit
@@ -933,13 +1052,17 @@ class MainWindow(QMainWindow):
             config.accel_range = source_config.accel_range
             config.output_folder = source_config.output_folder
             config.upload_to_aws = source_config.upload_to_aws
-            
+            # Copy stop mode settings
+            config.stop_mode = source_config.stop_mode
+            config.repetition_count = source_config.repetition_count
+            config.stop_at_time = source_config.stop_at_time
+
             # Update card
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
-            
+
             count += 1
-        
+
         if count > 0:
             self._log_widget.success(f"Applied settings to {count} other sensor(s)")
 
@@ -987,19 +1110,41 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self._log_widget.error(f"Failed to blink: {e}")
 
+    def _check_memory_warning(self, configs: list) -> bool:
+        """Show warning if any config exceeds 16MB. Returns True to proceed."""
+        exceeding = [c for c in configs if c.exceeds_memory_limit()]
+        if not exceeding:
+            return True
+
+        sensor_list = "\n".join([
+            f"  - {c.hostname}: {c.format_memory_size()} "
+            f"({c.sample_rate.display_name} x {c.duration}s)"
+            for c in exceeding
+        ])
+        reply = QMessageBox.warning(
+            self, "Memory Warning",
+            f"These sensors may exceed 16MB device memory:\n\n{sensor_list}\n\nProceed anyway?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        return reply == QMessageBox.Yes
+
     @pyqtSlot(str)
     def _on_sensor_play(self, hostname: str) -> None:
         """Handle play button on sensor card."""
         config = self._sensors.get(hostname)
         if not config:
             return
-        
+
         if not config.is_configured:
             self._log_widget.warning(f"{hostname}: Please select an output folder first")
             # Select the sensor so user can configure it
             self._on_sensor_card_selected(hostname)
             return
-        
+
+        # Check memory warning
+        if not self._check_memory_warning([config]):
+            return
+
         if self._scheduler.start_sensor(hostname, run_immediately=True):
             self._log_widget.success(f"Started automation for {hostname}")
             if hostname in self._sensor_cards:
@@ -1019,6 +1164,20 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_start_all_clicked(self) -> None:
         """Start all configured sensors."""
+        # Get all configured sensors that aren't already running
+        configs_to_start = [
+            c for c in self._sensors.values()
+            if c.is_configured and not c.is_running
+        ]
+
+        if not configs_to_start:
+            self._log_widget.warning("No configured sensors to start")
+            return
+
+        # Check memory warning for all sensors being started
+        if not self._check_memory_warning(configs_to_start):
+            return
+
         count = self._scheduler.start_all(run_immediately=True)
         if count > 0:
             self._log_widget.success(f"Started automation for {count} sensor(s)")

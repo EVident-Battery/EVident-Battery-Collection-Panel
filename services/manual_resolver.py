@@ -42,9 +42,10 @@ class ManualResolverWorker(QThread):
         # Check if it's an IP address
         if IP_PATTERN.match(entry):
             self._resolve_ip(entry)
-        # Check if it's a hostname
-        elif HOSTNAME_PATTERN.match(entry):
-            self._resolve_hostname(entry)
+        # Check if it's a hostname (case-insensitive)
+        elif HOSTNAME_PATTERN.match(entry.upper()):
+            # Normalize to uppercase (EVBS_ABC123)
+            self._resolve_hostname(entry.upper())
         else:
             self.failed.emit(
                 f"Invalid input: '{entry}'. Enter an IP address (e.g., 192.168.1.100) "

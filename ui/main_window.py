@@ -497,7 +497,7 @@ class MainWindow(QMainWindow):
         settings_grid.addWidget(QLabel("Duration:"), row, 0)
         duration_layout = QHBoxLayout()
         self._duration_spin = QSpinBox()
-        self._duration_spin.setRange(1, 300)
+        self._duration_spin.setRange(1, 200000)
         self._duration_spin.setValue(10)
         self._duration_spin.setSuffix(" seconds")
         self._duration_spin.setMinimumWidth(120)

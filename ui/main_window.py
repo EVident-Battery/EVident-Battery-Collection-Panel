@@ -954,8 +954,8 @@ class MainWindow(QMainWindow):
         self._count_radio.setEnabled(enabled)
         self._time_radio.setEnabled(enabled)
         if enabled:
-            # Update enabled state based on radio selection
-            self._on_stop_mode_changed()
+            # Update enabled state based on radio selection (no config save)
+            self._update_stop_mode_controls_state()
         else:
             self._count_spin.setEnabled(False)
             self._stop_time_edit.setEnabled(False)
@@ -1122,8 +1122,8 @@ class MainWindow(QMainWindow):
         self._count_spin.blockSignals(False)
         self._stop_time_edit.blockSignals(False)
 
-        # Update stop mode control states
-        self._on_stop_mode_changed()
+        # Update stop mode control states (no config save)
+        self._update_stop_mode_controls_state()
 
     def _update_stats_display(self, config: SensorConfig) -> None:
         """Update statistics display for a sensor."""
@@ -1138,9 +1138,8 @@ class MainWindow(QMainWindow):
         if errors_lbl:
             errors_lbl.setText(str(config.stats.errors))
 
-    @pyqtSlot()
-    def _on_stop_mode_changed(self) -> None:
-        """Update enabled state of stop mode controls based on selection."""
+    def _update_stop_mode_controls_state(self) -> None:
+        """Update enabled/disabled state and styling of stop mode sub-controls without saving."""
         count_enabled = self._count_radio.isChecked()
         time_enabled = self._time_radio.isChecked()
 
@@ -1158,6 +1157,10 @@ class MainWindow(QMainWindow):
         self._count_spin.setStyleSheet(dim_style if not count_enabled else normal_style)
         self._stop_time_edit.setStyleSheet(time_dim_style if not time_enabled else time_normal_style)
 
+    @pyqtSlot()
+    def _on_stop_mode_changed(self) -> None:
+        """Update enabled state of stop mode controls and save to config."""
+        self._update_stop_mode_controls_state()
         self._on_settings_changed()
 
     @pyqtSlot()

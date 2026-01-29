@@ -1224,8 +1224,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_browse_clicked(self) -> None:
         """Open folder selection dialog."""
+        current = self._folder_edit.text()
+        start_dir = current if current and Path(current).is_dir() else str(Path.home())
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Output Folder", str(Path.home()),
+            self, "Select Output Folder", start_dir,
             QFileDialog.DontUseNativeDialog
         )
         if folder and self._selected_hostname:

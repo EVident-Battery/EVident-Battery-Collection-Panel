@@ -189,6 +189,13 @@ QSplitter::handle {
 QSplitter::handle:vertical {
     height: 4px;
 }
+
+QHeaderView::section {
+    background-color: #1E3A5F;
+    color: #E2E8F0;
+    border: 1px solid #334155;
+    padding: 4px 8px;
+}
 """
 
 

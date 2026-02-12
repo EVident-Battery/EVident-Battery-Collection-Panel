@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
-    QRadioButton, QTimeEdit, QMessageBox
+    QRadioButton, QTimeEdit, QMessageBox, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
@@ -22,6 +22,7 @@ from services.multi_scheduler import MultiSensorScheduler
 from services.manual_resolver import ManualResolverWorker
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
+from ui.monitoring_tab import MonitoringTabWidget
 
 
 # Stylesheet for the entire application
@@ -196,6 +197,37 @@ QHeaderView::section {
     border: 1px solid #334155;
     padding: 4px 8px;
 }
+
+QTabWidget::pane {
+    border: 1px solid #334155;
+    border-radius: 6px;
+    background-color: #0F172A;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background-color: #1E293B;
+    color: #94A3B8;
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 20px;
+    margin-right: 4px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+QTabBar::tab:selected {
+    background-color: #0F172A;
+    color: #E2E8F0;
+    border-bottom: 2px solid #3B82F6;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #293548;
+    color: #CBD5E1;
+}
 """
 
 
@@ -236,54 +268,71 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1100, 750)
         self.resize(1200, 850)
         self.setStyleSheet(APP_STYLESHEET)
-        
+
         # Central widget
         central = QWidget()
         self.setCentralWidget(central)
-        
+
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(16, 16, 16, 12)
         main_layout.setSpacing(12)
-        
-        # Header
+
+        # Header (shared, above tabs)
         header = self._create_header()
         main_layout.addWidget(header)
-        
+
+        # Tab widget
+        self._tab_widget = QTabWidget()
+
+        # ---- Tab 1: Data Collection (existing UI) ----
+        tab1 = QWidget()
+        tab1_layout = QVBoxLayout(tab1)
+        tab1_layout.setContentsMargins(0, 8, 0, 0)
+        tab1_layout.setSpacing(12)
+
         # Main content splitter
         splitter = QSplitter(Qt.Vertical)
         splitter.setChildrenCollapsible(False)
-        
+
         # Top section: sensor list + settings
         top_widget = QWidget()
         top_layout = QHBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(16)
-        
+
         # Left: Discovered sensors panel (scrollable)
         sensor_panel = self._create_sensor_panel()
         top_layout.addWidget(sensor_panel, 1)
-        
+
         # Right: Settings panel
         settings_panel = self._create_settings_panel()
         top_layout.addWidget(settings_panel, 1)
-        
+
         splitter.addWidget(top_widget)
-        
+
         # Status bar above log
         self._status_bar = self._create_status_bar()
         splitter.addWidget(self._status_bar)
-        
+
         # Bottom: Log console
         self._log_widget = LogWidget()
         splitter.addWidget(self._log_widget)
-        
+
         splitter.setSizes([380, 40, 220])
-        main_layout.addWidget(splitter, 1)
-        
+        tab1_layout.addWidget(splitter, 1)
+
+        self._tab_widget.addTab(tab1, "Data Collection")
+
+        # ---- Tab 2: Machine Monitoring ----
+        self._monitoring_tab = MonitoringTabWidget()
+        self._tab_widget.addTab(self._monitoring_tab, "Machine Monitoring")
+
+        main_layout.addWidget(self._tab_widget, 1)
+
         # Start uptime timer
         self._uptime_timer.start()
-        
-        # Footer
+
+        # Footer (shared, below tabs)
         footer = self._create_footer()
         main_layout.addWidget(footer)
 
@@ -1024,6 +1073,9 @@ class MainWindow(QMainWindow):
         else:
             self._log_widget.success(f"Discovered: {hostname} ({ip})")
 
+        # Update monitoring tab sensor list
+        self._monitoring_tab.update_sensors(self._sensors)
+
     @pyqtSlot(str)
     def _on_device_lost(self, hostname: str) -> None:
         """Handle lost sensor."""
@@ -1044,6 +1096,9 @@ class MainWindow(QMainWindow):
             self._set_settings_enabled(False)
         
         self._log_widget.warning(f"Sensor disconnected: {hostname}")
+
+        # Update monitoring tab sensor list
+        self._monitoring_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_sensor_card_selected(self, hostname: str) -> None:
@@ -1375,6 +1430,9 @@ class MainWindow(QMainWindow):
         else:
             self._log_widget.success(f"Added manually: {hostname} ({ip})")
 
+        # Update monitoring tab sensor list
+        self._monitoring_tab.update_sensors(self._sensors)
+
     @pyqtSlot(str)
     def _on_manual_failed(self, error: str) -> None:
         """Handle manual resolution failure."""
@@ -1615,5 +1673,6 @@ class MainWindow(QMainWindow):
         """Handle window close."""
         self._uptime_timer.stop()
         self._scheduler.stop_all()
+        self._monitoring_tab.stop_pipeline()
         self._discovery.stop()
         super().closeEvent(event)

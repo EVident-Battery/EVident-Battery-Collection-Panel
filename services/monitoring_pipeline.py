@@ -327,7 +327,7 @@ class MonitoringPipeline(QObject):
     def _on_upload_complete(self, message: str) -> None:
         self._stats.uploads_succeeded += 1
         self._emit_stats()
-        self._log(message, "info")
+        self._log(message, "success")
 
     def _on_upload_failed(self, error: str) -> None:
         self._log(f"AWS upload failed: {error}", "error")

@@ -90,31 +90,48 @@ class MonitoringTabWidget(QWidget):
 
     def _create_sensor_selection(self) -> QWidget:
         group = QGroupBox("Sensor Selection")
-        layout = QVBoxLayout(group)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 8, 0, 0)
+        group_layout.setSpacing(0)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)
 
         label = QLabel("Select a discovered sensor:")
-        label.setStyleSheet("color: #CBD5E1;")
+        label.setStyleSheet("color: #CBD5E1; background: transparent;")
         layout.addWidget(label)
 
         self._sensor_combo = QComboBox()
         self._sensor_combo.setMinimumWidth(200)
-        self._sensor_combo.setPlaceholderText("No sensors available")
+        self._sensor_combo.addItem("No sensors found")
+        self._sensor_combo.model().item(0).setEnabled(False)
         layout.addWidget(self._sensor_combo)
 
         # Sensor info label
         self._sensor_info = QLabel("")
-        self._sensor_info.setStyleSheet("color: #64748B; font-size: 11px;")
+        self._sensor_info.setStyleSheet("color: #64748B; font-size: 11px; background: transparent;")
         self._sensor_info.setWordWrap(True)
         layout.addWidget(self._sensor_info)
 
         layout.addStretch()
 
+        group_layout.addWidget(content)
+
         return group
 
     def _create_config_panel(self) -> QWidget:
         group = QGroupBox("Configuration")
-        layout = QVBoxLayout(group)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 8, 0, 0)
+        group_layout.setSpacing(0)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
 
         grid = QGridLayout()
@@ -125,7 +142,9 @@ class MonitoringTabWidget(QWidget):
         row = 0
 
         # Duration
-        grid.addWidget(QLabel("Duration:"), row, 0)
+        lbl = QLabel("Duration:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0)
         dur_layout = QHBoxLayout()
         self._duration_spin = QSpinBox()
         self._duration_spin.setRange(1, 200000)
@@ -139,7 +158,9 @@ class MonitoringTabWidget(QWidget):
         row += 1
 
         # Sample Rate
-        grid.addWidget(QLabel("Sample Rate:"), row, 0)
+        lbl = QLabel("Sample Rate:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0)
         odr_layout = QHBoxLayout()
         self._odr_combo = QComboBox()
         for rate in SampleRate.all_rates():
@@ -153,7 +174,9 @@ class MonitoringTabWidget(QWidget):
         row += 1
 
         # Baseline Runs
-        grid.addWidget(QLabel("Baseline Runs:"), row, 0)
+        lbl = QLabel("Baseline Runs:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0)
         bl_layout = QHBoxLayout()
         self._baseline_spin = QSpinBox()
         self._baseline_spin.setRange(2, 1000)
@@ -166,7 +189,9 @@ class MonitoringTabWidget(QWidget):
         row += 1
 
         # Monitor Interval
-        grid.addWidget(QLabel("Monitor Interval:"), row, 0)
+        lbl = QLabel("Monitor Interval:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0)
         mi_layout = QHBoxLayout()
         self._interval_spin = QSpinBox()
         self._interval_spin.setRange(1, 3600)
@@ -180,14 +205,16 @@ class MonitoringTabWidget(QWidget):
         row += 1
 
         # Save Location section
-        grid.addWidget(QLabel("Save Mode:"), row, 0, Qt.AlignTop)
+        lbl = QLabel("Save Mode:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0, Qt.AlignTop)
         save_layout = QVBoxLayout()
         save_layout.setSpacing(6)
 
         # Save Location radio + browse
         loc_row = QHBoxLayout()
         self._save_loc_radio = QRadioButton("Save Location")
-        self._save_loc_radio.setStyleSheet("color: #CBD5E1;")
+        self._save_loc_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._save_loc_radio.toggled.connect(self._on_save_mode_changed)
         loc_row.addWidget(self._save_loc_radio)
 
@@ -204,7 +231,7 @@ class MonitoringTabWidget(QWidget):
 
         # Monitor radio
         self._monitor_radio = QRadioButton("Monitor (temporary)")
-        self._monitor_radio.setStyleSheet("color: #CBD5E1;")
+        self._monitor_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._monitor_radio.setChecked(True)
         save_layout.addWidget(self._monitor_radio)
 
@@ -213,7 +240,9 @@ class MonitoringTabWidget(QWidget):
         row += 1
 
         # License Key
-        grid.addWidget(QLabel("License Key:"), row, 0)
+        lbl = QLabel("License Key:")
+        lbl.setStyleSheet("background: transparent;")
+        grid.addWidget(lbl, row, 0)
         self._license_edit = QLineEdit()
         self._license_edit.setPlaceholderText("Enter license key for AWS uploads")
         self._license_edit.setEchoMode(QLineEdit.Password)
@@ -221,6 +250,8 @@ class MonitoringTabWidget(QWidget):
 
         layout.addLayout(grid)
         layout.addStretch()
+
+        group_layout.addWidget(content)
 
         # Initialize save mode state
         self._on_save_mode_changed()
@@ -404,13 +435,19 @@ class MonitoringTabWidget(QWidget):
 
         self._sensor_combo.blockSignals(True)
         self._sensor_combo.clear()
-        for hostname in sorted(sensors.keys()):
-            self._sensor_combo.addItem(hostname)
 
-        # Restore selection if still available
-        idx = self._sensor_combo.findText(current)
-        if idx >= 0:
-            self._sensor_combo.setCurrentIndex(idx)
+        if not sensors:
+            self._sensor_combo.addItem("No sensors found")
+            self._sensor_combo.model().item(0).setEnabled(False)
+        else:
+            for hostname in sorted(sensors.keys()):
+                self._sensor_combo.addItem(hostname)
+
+            # Restore selection if still available
+            idx = self._sensor_combo.findText(current)
+            if idx >= 0:
+                self._sensor_combo.setCurrentIndex(idx)
+
         self._sensor_combo.blockSignals(False)
 
         # Update info
@@ -453,7 +490,7 @@ class MonitoringTabWidget(QWidget):
     def _on_start_clicked(self) -> None:
         # Validate
         hostname = self._sensor_combo.currentText()
-        if not hostname:
+        if not hostname or hostname == "No sensors found":
             QMessageBox.warning(self, "No Sensor", "Please select a sensor first.")
             return
 

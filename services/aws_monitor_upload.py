@@ -1,8 +1,11 @@
-"""Placeholder AWS upload service for monitoring anomaly data."""
+"""AWS upload service for monitoring anomaly data."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Optional
 
+import requests
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
 
@@ -34,36 +37,73 @@ class AWSUploadWorker(QThread):
 
     def run(self) -> None:
         """
-        Full upload flow (stubbed for now):
+        Upload flow:
         1. POST to AWS_ENDPOINT with auth headers to get presigned URLs
         2. PUT baseline.json to presigned URL
         3. PUT sensor CSV data to presigned URL
         """
         try:
+            csv_filename = Path(self.sensor_csv_path).name
+
             # Step 1: Get presigned URLs
-            # headers = {
-            #     "auth-token": self.license_key,
-            #     "evb-user-type": "customer",
-            # }
-            # payload = {
-            #     "sensor_id": self.sensor_id,
-            #     "detection_result": self.detection_result,
-            #     "thresholds": self.thresholds,
-            # }
-            # response = requests.post(AWS_ENDPOINT, json=payload, headers=headers)
-            # presigned = response.json()
+            headers = {
+                "auth-token": self.license_key,
+                "evb-user-type": "customer",
+            }
+            payload = {
+                "sensor_id": self.sensor_id,
+                "filenames": ["baseline.json", csv_filename],
+                "detection_result": self.detection_result,
+                "thresholds": self.thresholds,
+            }
+            resp = requests.post(AWS_ENDPOINT, json=payload, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                self.upload_failed.emit(
+                    f"Presign request failed ({resp.status_code}): {resp.text[:200]}"
+                )
+                return
 
-            # Step 2: PUT baseline.json
-            # requests.put(presigned["baseline_url"], json=self.baseline_json)
+            resp_json = resp.json()
 
-            # Step 3: PUT sensor CSV
-            # with open(self.sensor_csv_path, "rb") as f:
-            #     requests.put(presigned["data_url"], data=f)
+            # Parse presigned URLs from response: {"files": [{"key": "...", "url": "..."}]}
+            files_list = resp_json.get("files", [])
+            urls = {item["key"]: item["url"] for item in files_list}
 
-            # For now: pass (stub)
-            pass
+            baseline_url = None
+            data_url = None
+            for key, url in urls.items():
+                if key.endswith("baseline.json"):
+                    baseline_url = url
+                else:
+                    data_url = url
 
-            self.upload_complete.emit(f"Upload stub complete for {self.sensor_id}")
+            if not baseline_url or not data_url:
+                self.upload_failed.emit(
+                    f"Missing presigned URLs. Got keys: {list(urls.keys())}"
+                )
+                return
+
+            # Step 2: PUT baseline.json (no Content-Type — signature mismatch otherwise)
+            baseline_body = json.dumps(self.baseline_json)
+            put_resp = requests.put(baseline_url, data=baseline_body, timeout=30)
+            if put_resp.status_code not in (200, 204):
+                self.upload_failed.emit(
+                    f"Baseline upload failed ({put_resp.status_code}): {put_resp.text[:200]}"
+                )
+                return
+
+            # Step 3: PUT sensor CSV (no Content-Type)
+            with open(self.sensor_csv_path, "rb") as f:
+                put_resp = requests.put(data_url, data=f, timeout=30)
+            if put_resp.status_code not in (200, 204):
+                self.upload_failed.emit(
+                    f"CSV upload failed ({put_resp.status_code}): {put_resp.text[:200]}"
+                )
+                return
+
+            self.upload_complete.emit(
+                f"Uploaded anomaly data for {self.sensor_id} ({csv_filename})"
+            )
         except Exception as e:
             self.upload_failed.emit(str(e))
 

@@ -499,12 +499,12 @@ class MainWindow(QMainWindow):
 
         self._auto_radio = QRadioButton("Automatic")
         self._auto_radio.setChecked(True)
-        self._auto_radio.setStyleSheet("color: #CBD5E1;")
+        self._auto_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._auto_radio.toggled.connect(self._on_discovery_mode_changed)
         mode_layout.addWidget(self._auto_radio)
 
         self._manual_radio = QRadioButton("Manual")
-        self._manual_radio.setStyleSheet("color: #CBD5E1;")
+        self._manual_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         mode_layout.addWidget(self._manual_radio)
 
         mode_layout.addStretch()

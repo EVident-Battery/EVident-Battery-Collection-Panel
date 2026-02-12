@@ -1,11 +1,15 @@
 """State machine orchestrator for the Machine Monitoring pipeline."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+import numpy as np
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -309,11 +313,61 @@ class MonitoringPipeline(QObject):
         baseline_json_path = os.path.join(self._baseline_dir, "..", "baseline.json")
         if os.path.exists(baseline_json_path):
             try:
-                import json
                 with open(baseline_json_path) as f:
                     baseline_data = json.load(f)
             except Exception:
                 pass
+
+        # Build detection_results.json with processed analysis data
+        baseline_axes = baseline_data.get("axes", {})
+        detection_results_dict = {
+            "version": 1,
+            "sensor_id": self._config.hostname,
+            "filename": Path(csv_path).name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "freqs": result.freqs.tolist(),
+            "axes": {},
+        }
+
+        for axis in result.triggered:
+            z_arr = result.z_scores[axis]
+            t_val = result.T[axis]
+            t_thresh = result.T_threshold[axis]
+            m_val = result.M[axis]
+            m_thresh = result.M_threshold[axis]
+
+            # Reconstruct new PSD: psd_db = z_scores * scale + center
+            new_psd_db = None
+            if axis in baseline_axes:
+                center = np.array(baseline_axes[axis]["center"])
+                scale = np.array(baseline_axes[axis]["scale"])
+                new_psd_db = (z_arr * scale + center).tolist()
+
+            # Top 5 deviations by absolute z-score
+            top_indices = np.argsort(np.abs(z_arr))[::-1][:5]
+            top_deviations = [
+                {
+                    "freq_hz": float(result.freqs[idx]),
+                    "z_score": float(z_arr[idx]),
+                }
+                for idx in top_indices
+            ]
+
+            detection_results_dict["axes"][axis] = {
+                "new_psd_db": new_psd_db,
+                "z_scores": z_arr.tolist(),
+                "prominence_z": result.prominence_z[axis].tolist(),
+                "T": t_val,
+                "T_threshold": t_thresh,
+                "T_triggered": result.T_triggered[axis],
+                "T_norm": t_val / t_thresh if t_thresh else 0.0,
+                "M": m_val,
+                "M_threshold": m_thresh,
+                "M_triggered": result.M_triggered[axis],
+                "M_norm": m_val / m_thresh if m_thresh else 0.0,
+                "triggered": result.triggered[axis],
+                "top_deviations": top_deviations,
+            }
 
         self._aws.upload(
             license_key=self._config.license_key,
@@ -322,6 +376,7 @@ class MonitoringPipeline(QObject):
             sensor_csv_path=csv_path,
             detection_result=detection_dict,
             thresholds=thresholds_dict,
+            detection_results_json=detection_results_dict,
         )
 
     def _on_upload_complete(self, message: str) -> None:

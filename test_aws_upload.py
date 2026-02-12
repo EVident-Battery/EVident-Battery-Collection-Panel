@@ -112,6 +112,40 @@ def make_dummy_thresholds() -> dict:
     }
 
 
+def make_dummy_detection_results_json() -> dict:
+    """Build a sample detection_results.json payload."""
+    return {
+        "version": 1,
+        "sensor_id": "test-sensor-001",
+        "filename": "test_sensor_data.csv",
+        "timestamp": "2026-02-12T16:00:00+00:00",
+        "freqs": [float(i * 0.5) for i in range(20)],
+        "axes": {
+            "accel_x": {
+                "new_psd_db": [-50.0 + i * 0.5 for i in range(20)],
+                "z_scores": [0.1 * i for i in range(20)],
+                "prominence_z": [0.05 * i for i in range(20)],
+                "T": 3100.0,
+                "T_threshold": 2500.0,
+                "T_triggered": True,
+                "T_norm": 1.24,
+                "M": 6.2,
+                "M_threshold": 8.5,
+                "M_triggered": False,
+                "M_norm": 0.729,
+                "triggered": True,
+                "top_deviations": [
+                    {"freq_hz": 9.5, "z_score": 1.9},
+                    {"freq_hz": 9.0, "z_score": 1.8},
+                    {"freq_hz": 8.5, "z_score": 1.7},
+                    {"freq_hz": 8.0, "z_score": 1.6},
+                    {"freq_hz": 7.5, "z_score": 1.5},
+                ],
+            },
+        },
+    }
+
+
 def make_dummy_csv() -> str:
     """Create a tiny dummy CSV and return its path."""
     tmp = tempfile.NamedTemporaryFile(
@@ -137,6 +171,7 @@ def test_upload(
     csv_path: str,
     detection_result: dict,
     thresholds: dict,
+    detection_results_json: dict = None,
 ) -> None:
     """Run the full upload flow step by step with clear output."""
 
@@ -150,6 +185,8 @@ def test_upload(
     # Build filenames list from what we're uploading
     csv_filename = Path(csv_path).name
     filenames = ["baseline.json", csv_filename]
+    if detection_results_json:
+        filenames.append("detection_results.json")
 
     payload = {
         "sensor_id": sensor_id,
@@ -330,10 +367,39 @@ def test_upload(
         except Exception as e:
             print(f"  ERROR: {e}")
 
+    # ── Step 4: Upload detection_results.json ──
+    if detection_results_json:
+        separator("STEP 4: PUT detection_results.json to presigned URL")
+
+        det_url = None
+        for k, v in urls.items():
+            if k.endswith("detection_results.json"):
+                det_url = v
+                print(f"  Matched key: '{k}'")
+                break
+
+        if not det_url:
+            print(f"  No presigned URL found for 'detection_results.json'")
+            print(f"  Available URL keys: {list(urls.keys())}")
+            print(f"  -> Backend may not support this file yet (upload skipped)")
+        else:
+            det_body = json.dumps(detection_results_json)
+            print(f"  URL: {det_url[:100]}...")
+            print(f"  Uploading {len(det_body)} bytes of detection results JSON...")
+
+            try:
+                put_resp = requests.put(det_url, data=det_body, timeout=30)
+                print(f"  Status: {put_resp.status_code}")
+                if put_resp.status_code not in (200, 204):
+                    print(f"  Response: {put_resp.text[:300]}")
+                else:
+                    print(f"  SUCCESS")
+            except Exception as e:
+                print(f"  ERROR: {e}")
+
     # ── Summary ──
     separator("DONE")
-    print("  If all 3 steps returned 200/204, the upload flow works.")
-    print("  You can now uncomment the code in services/aws_monitor_upload.py")
+    print("  If all steps returned 200/204, the upload flow works.")
 
 
 def main():
@@ -384,6 +450,7 @@ def main():
 
     detection_result = make_dummy_detection_result()
     thresholds = make_dummy_thresholds()
+    detection_results_json = make_dummy_detection_results_json()
 
     print(f"\nSensor ID: {args.sensor_id}")
 
@@ -394,6 +461,7 @@ def main():
         csv_path=csv_path,
         detection_result=detection_result,
         thresholds=thresholds,
+        detection_results_json=detection_results_json,
     )
 
     # Clean up dummy CSV

@@ -26,6 +26,7 @@ class AWSUploadWorker(QThread):
         sensor_csv_path: str,
         detection_result: dict,
         thresholds: dict,
+        detection_results_json: dict = None,
     ) -> None:
         super().__init__()
         self.license_key = license_key
@@ -34,6 +35,7 @@ class AWSUploadWorker(QThread):
         self.sensor_csv_path = sensor_csv_path
         self.detection_result = detection_result
         self.thresholds = thresholds
+        self.detection_results_json = detection_results_json
 
     def run(self) -> None:
         """
@@ -41,6 +43,7 @@ class AWSUploadWorker(QThread):
         1. POST to AWS_ENDPOINT with auth headers to get presigned URLs
         2. PUT baseline.json to presigned URL
         3. PUT sensor CSV data to presigned URL
+        4. PUT detection_results.json to presigned URL (if available)
         """
         try:
             csv_filename = Path(self.sensor_csv_path).name
@@ -50,9 +53,13 @@ class AWSUploadWorker(QThread):
                 "auth-token": self.license_key,
                 "evb-user-type": "customer",
             }
+            filenames = ["baseline.json", csv_filename]
+            if self.detection_results_json:
+                filenames.append("detection_results.json")
+
             payload = {
                 "sensor_id": self.sensor_id,
-                "filenames": ["baseline.json", csv_filename],
+                "filenames": filenames,
                 "detection_result": self.detection_result,
                 "thresholds": self.thresholds,
             }
@@ -71,10 +78,13 @@ class AWSUploadWorker(QThread):
 
             baseline_url = None
             data_url = None
+            detection_results_url = None
             for key, url in urls.items():
                 if key.endswith("baseline.json"):
                     baseline_url = url
-                else:
+                elif key.endswith("detection_results.json"):
+                    detection_results_url = url
+                elif key.endswith(csv_filename):
                     data_url = url
 
             if not baseline_url or not data_url:
@@ -101,6 +111,16 @@ class AWSUploadWorker(QThread):
                 )
                 return
 
+            # Step 4: PUT detection_results.json (skip if no URL returned)
+            if detection_results_url and self.detection_results_json:
+                det_body = json.dumps(self.detection_results_json)
+                put_resp = requests.put(detection_results_url, data=det_body, timeout=30)
+                if put_resp.status_code not in (200, 204):
+                    self.upload_failed.emit(
+                        f"Detection results upload failed ({put_resp.status_code}): {put_resp.text[:200]}"
+                    )
+                    return
+
             self.upload_complete.emit(
                 f"Uploaded anomaly data for {self.sensor_id} ({csv_filename})"
             )
@@ -126,6 +146,7 @@ class AWSMonitorUploadService(QObject):
         sensor_csv_path: str,
         detection_result: dict,
         thresholds: dict,
+        detection_results_json: dict = None,
     ) -> None:
         """Start an upload in a background thread."""
         self._worker = AWSUploadWorker(
@@ -135,6 +156,7 @@ class AWSMonitorUploadService(QObject):
             sensor_csv_path=sensor_csv_path,
             detection_result=detection_result,
             thresholds=thresholds,
+            detection_results_json=detection_results_json,
         )
         self._worker.upload_complete.connect(self._on_complete)
         self._worker.upload_failed.connect(self._on_failed)

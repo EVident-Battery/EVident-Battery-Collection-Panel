@@ -227,6 +227,9 @@ class MonitoringPipeline(QObject):
         except Exception as e:
             self._log(f"Failed to save baseline.json: {e}", "warning")
 
+        # Upload baseline to AWS after learning completes
+        self._upload_baseline()
+
         self._log("Training complete. Starting continuous monitoring...", "success")
         self._set_phase(MonitoringPhase.MONITORING)
         self._collect_next()
@@ -277,6 +280,32 @@ class MonitoringPipeline(QObject):
         """Handle spectral check failure."""
         self._log(f"Check failed for {Path(filename).name}: {error}", "error")
         self._schedule_next_monitor()
+
+    def _upload_baseline(self) -> None:
+        """Upload baseline.json to AWS after training completes."""
+        if not self._config or not self._config.license_key:
+            return
+
+        baseline_json_path = os.path.join(self._baseline_dir, "..", "baseline.json")
+        if not os.path.exists(baseline_json_path):
+            self._log("No baseline.json found to upload.", "warning")
+            return
+
+        try:
+            with open(baseline_json_path) as f:
+                baseline_data = json.load(f)
+        except Exception as e:
+            self._log(f"Failed to read baseline.json for upload: {e}", "warning")
+            return
+
+        self._stats.uploads_attempted += 1
+        self._emit_stats()
+
+        self._aws.upload(
+            license_key=self._config.license_key,
+            sensor_id=self._config.hostname,
+            baseline_json=baseline_data,
+        )
 
     def _upload_anomaly(self, csv_path: str, result) -> None:
         """Upload anomaly data to AWS."""

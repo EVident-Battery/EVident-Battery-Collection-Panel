@@ -241,8 +241,12 @@ class SpectralBaseline:
             X = np.array(frames)
             med = np.median(X, axis=0)
             mad = np.median(np.abs(X - med), axis=0)
+            # Floor at the median MAD across bins: bins that appear
+            # quieter than typical are likely under-sampled, not truly
+            # silent.  Prevents low-MAD bins from dominating z-scores.
+            mad_floor = max(np.median(mad), 1e-6)
             self.center[name] = med
-            self.scale[name] = 1.4826 * np.maximum(mad, 0.5)
+            self.scale[name] = 1.4826 * np.maximum(mad, mad_floor)
         self._phase1_frozen = True
         self._phase1_frames = {}
 
@@ -735,46 +739,51 @@ def train_from_folder(baseline_folder: str, analyzer: SpectralAnalyzer,
     """
     Learn a baseline from all CSVs in a folder.
 
-    Each CSV is split into overlapping frames (nperseg long, 75% overlap).
-    All frames across all files are pooled — different lengths are fine.
-    Frames are shuffled, then split into Phase 1 / Phase 2.
+    Each CSV is treated as one observation — its full-length Welch PSD
+    is used directly.  This matches the detection path (which also
+    passes entire recordings to compute_psd), so Phase-2 thresholds
+    are calibrated at the same noise level that detection will see.
     """
     files = load_folder(baseline_folder)
     if verbose:
         print(f"Found {len(files)} CSV files in {baseline_folder}")
 
-    all_frames = []
+    all_recordings = []
     for filename, fs, signals in files:
-        frames = extract_frames(signals, nperseg=analyzer.nperseg)
+        n = len(next(iter(signals.values())))
+        if n < analyzer.nperseg:
+            if verbose:
+                print(f"  {filename}: {n/fs:.1f}s — skipped (shorter than nperseg)")
+            continue
         if verbose:
-            n = len(next(iter(signals.values())))
-            print(f"  {filename}: {n/fs:.1f}s → {len(frames)} frames")
-        all_frames.extend(frames)
+            print(f"  {filename}: {n/fs:.1f}s")
+        all_recordings.append(signals)
 
-    if len(all_frames) < 4:
+    if len(all_recordings) < 4:
         raise ValueError(
-            f"Only {len(all_frames)} frames total. Need more data or smaller nperseg.")
+            f"Only {len(all_recordings)} recordings (need >= 4). "
+            f"Add more baseline files or use shorter nperseg.")
 
     # Shuffle to mix across files
     rng = np.random.default_rng(42)
-    all_frames = [all_frames[i] for i in rng.permutation(len(all_frames))]
+    all_recordings = [all_recordings[i] for i in rng.permutation(len(all_recordings))]
 
-    split = max(int(len(all_frames) * train_fraction), 2)
+    split = max(int(len(all_recordings) * train_fraction), 2)
     if verbose:
-        print(f"\nTotal frames: {len(all_frames)}")
+        print(f"\nTotal recordings: {len(all_recordings)}")
         print(f"Phase 1 (learn baseline): {split}")
-        print(f"Phase 2 (calibrate thresholds): {len(all_frames) - split}")
+        print(f"Phase 2 (calibrate thresholds): {len(all_recordings) - split}")
 
     baseline = SpectralBaseline(analyzer=analyzer, p_fa=p_fa)
 
-    for f in all_frames[:split]:
-        baseline.accumulate_phase1(f)
+    for rec in all_recordings[:split]:
+        baseline.accumulate_phase1(rec)
     baseline.freeze_baseline()
     if verbose:
         print(f"Baseline frozen. {baseline.n_bins} frequency bins.")
 
-    for f in all_frames[split:]:
-        baseline.accumulate_phase2(f)
+    for rec in all_recordings[split:]:
+        baseline.accumulate_phase2(rec)
     baseline.calibrate()
 
     if verbose:

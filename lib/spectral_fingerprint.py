@@ -242,7 +242,7 @@ class SpectralBaseline:
             med = np.median(X, axis=0)
             mad = np.median(np.abs(X - med), axis=0)
             self.center[name] = med
-            self.scale[name] = 1.4826 * (mad + 1e-6)
+            self.scale[name] = 1.4826 * np.maximum(mad, 0.5)
         self._phase1_frozen = True
         self._phase1_frames = {}
 

@@ -337,18 +337,15 @@ class MonitoringPipeline(QObject):
             for axis in result.T_threshold
         }
 
-        # Get baseline json data if available
-        baseline_data = {}
+        # Load baseline axes locally for building detection_results.json
+        baseline_axes = {}
         baseline_json_path = os.path.join(self._baseline_dir, "..", "baseline.json")
         if os.path.exists(baseline_json_path):
             try:
                 with open(baseline_json_path) as f:
-                    baseline_data = json.load(f)
+                    baseline_axes = json.load(f).get("axes", {})
             except Exception:
                 pass
-
-        # Build detection_results.json with processed analysis data
-        baseline_axes = baseline_data.get("axes", {})
         detection_results_dict = {
             "version": 1,
             "sensor_id": self._config.hostname,
@@ -401,7 +398,6 @@ class MonitoringPipeline(QObject):
         self._aws.upload(
             license_key=self._config.license_key,
             sensor_id=self._config.hostname,
-            baseline_json=baseline_data,
             sensor_csv_path=csv_path,
             detection_result=detection_dict,
             thresholds=thresholds_dict,

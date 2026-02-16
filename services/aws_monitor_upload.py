@@ -22,7 +22,7 @@ class AWSUploadWorker(QThread):
         self,
         license_key: str,
         sensor_id: str,
-        baseline_json: dict,
+        baseline_json: dict = None,
         sensor_csv_path: str = None,
         detection_result: dict = None,
         thresholds: dict = None,
@@ -53,7 +53,9 @@ class AWSUploadWorker(QThread):
                 "auth-token": self.license_key,
                 "evb-user-type": "customer",
             }
-            filenames = ["baseline.json"]
+            filenames = []
+            if self.baseline_json:
+                filenames.append("baseline.json")
             if csv_filename:
                 filenames.append(csv_filename)
             if self.detection_results_json:
@@ -92,7 +94,7 @@ class AWSUploadWorker(QThread):
                 elif csv_filename and key.endswith(csv_filename):
                     data_url = url
 
-            if not baseline_url:
+            if self.baseline_json and not baseline_url:
                 self.upload_failed.emit(
                     f"Missing baseline presigned URL. Got keys: {list(urls.keys())}"
                 )
@@ -105,13 +107,14 @@ class AWSUploadWorker(QThread):
                 return
 
             # Step 2: PUT baseline.json (no Content-Type — signature mismatch otherwise)
-            baseline_body = json.dumps(self.baseline_json)
-            put_resp = requests.put(baseline_url, data=baseline_body, timeout=30)
-            if put_resp.status_code not in (200, 204):
-                self.upload_failed.emit(
-                    f"Baseline upload failed ({put_resp.status_code}): {put_resp.text[:200]}"
-                )
-                return
+            if self.baseline_json and baseline_url:
+                baseline_body = json.dumps(self.baseline_json)
+                put_resp = requests.put(baseline_url, data=baseline_body, timeout=30)
+                if put_resp.status_code not in (200, 204):
+                    self.upload_failed.emit(
+                        f"Baseline upload failed ({put_resp.status_code}): {put_resp.text[:200]}"
+                    )
+                    return
 
             # Step 3: PUT sensor CSV (no Content-Type) — skip if baseline-only upload
             if self.sensor_csv_path and data_url:
@@ -159,7 +162,7 @@ class AWSMonitorUploadService(QObject):
         self,
         license_key: str,
         sensor_id: str,
-        baseline_json: dict,
+        baseline_json: dict = None,
         sensor_csv_path: str = None,
         detection_result: dict = None,
         thresholds: dict = None,

@@ -32,10 +32,11 @@ class SensorCardWidget(QFrame):
     play_clicked = pyqtSignal(str)  # hostname
     pause_clicked = pyqtSignal(str)  # hostname
     
-    def __init__(self, config: SensorConfig, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, config: SensorConfig, show_controls: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.config = config
         self._is_selected = False
+        self._show_controls = show_controls
         self._setup_ui()
         
     def _setup_ui(self) -> None:
@@ -81,91 +82,98 @@ class SensorCardWidget(QFrame):
         ip_row.addStretch()
         layout.addLayout(ip_row)
         
-        # Bottom row: Countdown + Controls
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
-        
-        # Countdown display
-        self._countdown_label = QLabel("⏱ --:--")
-        self._countdown_label.setFont(QFont("Consolas", 11))
-        self._countdown_label.setStyleSheet("color: #94A3B8;")
-        bottom_row.addWidget(self._countdown_label)
-        
-        # Status indicator
-        self._status_label = QLabel()
-        self._status_label.setStyleSheet("color: #64748B; font-size: 10px;")
-        bottom_row.addWidget(self._status_label)
-        
-        bottom_row.addStretch()
-        
-        # Play button
-        self._play_btn = QPushButton("▶")
-        self._play_btn.setFixedSize(28, 28)
-        self._play_btn.setToolTip("Start collection")
-        self._play_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #059669;
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #10B981;
-            }
-            QPushButton:disabled {
-                background-color: #334155;
-                color: #64748B;
-            }
-        """)
-        self._play_btn.clicked.connect(self._on_play)
-        bottom_row.addWidget(self._play_btn)
-        
-        # Pause button
-        self._pause_btn = QPushButton("⏸")
-        self._pause_btn.setFixedSize(28, 28)
-        self._pause_btn.setToolTip("Stop collection")
-        self._pause_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #DC2626;
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #EF4444;
-            }
-            QPushButton:disabled {
-                background-color: #334155;
-                color: #64748B;
-            }
-        """)
-        self._pause_btn.clicked.connect(self._on_pause)
-        self._pause_btn.setVisible(False)
-        bottom_row.addWidget(self._pause_btn)
-        
-        layout.addLayout(bottom_row)
-        
-        # Progress bar
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        self._progress_bar.setTextVisible(False)
-        self._progress_bar.setFixedHeight(4)
-        self._progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #334155;
-                border: none;
-                border-radius: 2px;
-            }
-            QProgressBar::chunk {
-                background-color: #3B82F6;
-                border-radius: 2px;
-            }
-        """)
-        self._progress_bar.setVisible(False)
-        layout.addWidget(self._progress_bar)
+        # Bottom row: Countdown + Controls (only for data collection mode)
+        if self._show_controls:
+            bottom_row = QHBoxLayout()
+            bottom_row.setSpacing(8)
+
+            # Countdown display
+            self._countdown_label = QLabel("⏱ --:--")
+            self._countdown_label.setFont(QFont("Consolas", 11))
+            self._countdown_label.setStyleSheet("color: #94A3B8;")
+            bottom_row.addWidget(self._countdown_label)
+
+            # Status indicator
+            self._status_label = QLabel()
+            self._status_label.setStyleSheet("color: #64748B; font-size: 10px;")
+            bottom_row.addWidget(self._status_label)
+
+            bottom_row.addStretch()
+
+            # Play button
+            self._play_btn = QPushButton("▶")
+            self._play_btn.setFixedSize(28, 28)
+            self._play_btn.setToolTip("Start collection")
+            self._play_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #059669;
+                    color: white;
+                    border: none;
+                    border-radius: 14px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #10B981;
+                }
+                QPushButton:disabled {
+                    background-color: #334155;
+                    color: #64748B;
+                }
+            """)
+            self._play_btn.clicked.connect(self._on_play)
+            bottom_row.addWidget(self._play_btn)
+
+            # Pause button
+            self._pause_btn = QPushButton("⏸")
+            self._pause_btn.setFixedSize(28, 28)
+            self._pause_btn.setToolTip("Stop collection")
+            self._pause_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #DC2626;
+                    color: white;
+                    border: none;
+                    border-radius: 14px;
+                    font-size: 10px;
+                }
+                QPushButton:hover {
+                    background-color: #EF4444;
+                }
+                QPushButton:disabled {
+                    background-color: #334155;
+                    color: #64748B;
+                }
+            """)
+            self._pause_btn.clicked.connect(self._on_pause)
+            self._pause_btn.setVisible(False)
+            bottom_row.addWidget(self._pause_btn)
+
+            layout.addLayout(bottom_row)
+
+            # Progress bar
+            self._progress_bar = QProgressBar()
+            self._progress_bar.setRange(0, 100)
+            self._progress_bar.setValue(0)
+            self._progress_bar.setTextVisible(False)
+            self._progress_bar.setFixedHeight(4)
+            self._progress_bar.setStyleSheet("""
+                QProgressBar {
+                    background-color: #334155;
+                    border: none;
+                    border-radius: 2px;
+                }
+                QProgressBar::chunk {
+                    background-color: #3B82F6;
+                    border-radius: 2px;
+                }
+            """)
+            self._progress_bar.setVisible(False)
+            layout.addWidget(self._progress_bar)
+        else:
+            self._countdown_label = None
+            self._status_label = None
+            self._play_btn = None
+            self._pause_btn = None
+            self._progress_bar = None
         
         self._update_display()
     
@@ -217,6 +225,9 @@ class SensorCardWidget(QFrame):
 
         # Manual badge visibility
         self._manual_badge.setVisible(self.config.discovery_source == DiscoverySource.MANUAL)
+
+        if not self._show_controls:
+            return
 
         # Countdown
         if self.config.is_running:
@@ -275,6 +286,8 @@ class SensorCardWidget(QFrame):
     def set_progress(self, value: int) -> None:
         """Set progress bar value (0-100)."""
         self.config.progress = value
+        if self._progress_bar is None:
+            return
         self._progress_bar.setValue(value)
         if value > 0 and not self._progress_bar.isVisible():
             self._progress_bar.setVisible(True)

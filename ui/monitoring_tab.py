@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QProgressBar, QGroupBox, QGridLayout,
-    QRadioButton, QSizePolicy, QMessageBox,
+    QRadioButton, QSizePolicy, QMessageBox, QScrollArea,
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -17,6 +17,7 @@ from models.sensor_config import SensorConfig, SampleRate
 from models.monitoring_config import MonitoringConfig, MonitoringPhase, MonitoringStats, SaveMode
 from services.monitoring_pipeline import MonitoringPipeline
 from ui.log_widget import LogWidget
+from ui.sensor_card import SensorCardWidget
 
 
 # Phase display colors
@@ -46,6 +47,8 @@ class MonitoringTabWidget(QWidget):
         super().__init__(parent)
 
         self._sensors: Dict[str, SensorConfig] = {}
+        self._sensor_cards: Dict[str, SensorCardWidget] = {}
+        self._selected_hostname: Optional[str] = None
         self._pipeline = MonitoringPipeline()
 
         self._setup_ui()
@@ -90,43 +93,51 @@ class MonitoringTabWidget(QWidget):
 
     def _create_sensor_selection(self) -> QWidget:
         group = QGroupBox("Sensor Selection")
+        group.setMinimumWidth(280)
         group_layout = QVBoxLayout(group)
         group_layout.setContentsMargins(0, 8, 0, 0)
         group_layout.setSpacing(0)
 
-        content = QWidget()
-        content.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(10)
+        # Scroll area for sensor cards
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
-        label = QLabel("Select a discovered sensor:")
-        label.setStyleSheet("color: #CBD5E1; background: transparent;")
-        layout.addWidget(label)
+        # Container for cards
+        self._cards_container = QWidget()
+        self._cards_container.setStyleSheet("background: transparent;")
+        self._cards_layout = QVBoxLayout(self._cards_container)
+        self._cards_layout.setContentsMargins(4, 4, 4, 4)
+        self._cards_layout.setSpacing(8)
 
-        self._sensor_combo = QComboBox()
-        self._sensor_combo.setMinimumWidth(200)
-        self._sensor_combo.addItem("No sensors found")
-        self._sensor_combo.model().item(0).setEnabled(False)
-        layout.addWidget(self._sensor_combo)
+        # Placeholder label (shown when no sensors)
+        self._no_sensors_label = QLabel("No sensors discovered")
+        self._no_sensors_label.setStyleSheet("color: #64748B; font-size: 12px; background: transparent;")
+        self._no_sensors_label.setAlignment(Qt.AlignCenter)
+        self._cards_layout.addWidget(self._no_sensors_label)
 
-        # Sensor info label
-        self._sensor_info = QLabel("")
-        self._sensor_info.setStyleSheet("color: #64748B; font-size: 11px; background: transparent;")
-        self._sensor_info.setWordWrap(True)
-        layout.addWidget(self._sensor_info)
+        self._cards_layout.addStretch()
 
-        layout.addStretch()
-
-        group_layout.addWidget(content)
+        scroll.setWidget(self._cards_container)
+        group_layout.addWidget(scroll, 1)
 
         return group
 
     def _create_config_panel(self) -> QWidget:
         group = QGroupBox("Configuration")
+        group.setMinimumHeight(250)
         group_layout = QVBoxLayout(group)
         group_layout.setContentsMargins(0, 8, 0, 0)
         group_layout.setSpacing(0)
+
+        # Wrap content in scroll area to handle vertical compression
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         content = QWidget()
         content.setStyleSheet("background: transparent;")
@@ -138,6 +149,9 @@ class MonitoringTabWidget(QWidget):
         grid.setSpacing(8)
         grid.setColumnStretch(1, 1)
         grid.setColumnMinimumWidth(0, 120)
+        grid.setColumnMinimumWidth(1, 200)
+        for i in range(6):
+            grid.setRowMinimumHeight(i, 32)
 
         row = 0
 
@@ -251,7 +265,9 @@ class MonitoringTabWidget(QWidget):
         layout.addLayout(grid)
         layout.addStretch()
 
-        group_layout.addWidget(content)
+        # Add content widget to scroll area, scroll area to group
+        scroll.setWidget(content)
+        group_layout.addWidget(scroll)
 
         # Initialize save mode state
         self._on_save_mode_changed()
@@ -424,34 +440,35 @@ class MonitoringTabWidget(QWidget):
         self._pipeline.log_message.connect(self._on_log_message)
         self._pipeline.stats_updated.connect(self._on_stats_updated)
         self._pipeline.pipeline_complete.connect(self._on_pipeline_complete)
-        self._sensor_combo.currentTextChanged.connect(self._on_sensor_selected)
 
     # ----- Public API (called by MainWindow) -----
 
     def update_sensors(self, sensors: Dict[str, SensorConfig]) -> None:
-        """Update the sensor dropdown when sensors are discovered/lost."""
+        """Update the sensor cards when sensors are discovered/lost."""
         self._sensors = sensors
-        current = self._sensor_combo.currentText()
 
-        self._sensor_combo.blockSignals(True)
-        self._sensor_combo.clear()
+        # Remove cards for sensors that no longer exist
+        removed = [h for h in self._sensor_cards if h not in sensors]
+        for hostname in removed:
+            card = self._sensor_cards.pop(hostname)
+            self._cards_layout.removeWidget(card)
+            card.deleteLater()
+            if self._selected_hostname == hostname:
+                self._selected_hostname = None
 
-        if not sensors:
-            self._sensor_combo.addItem("No sensors found")
-            self._sensor_combo.model().item(0).setEnabled(False)
-        else:
-            for hostname in sorted(sensors.keys()):
-                self._sensor_combo.addItem(hostname)
+        # Add cards for new sensors, update existing ones
+        for hostname, config in sorted(sensors.items()):
+            if hostname not in self._sensor_cards:
+                card = SensorCardWidget(config, show_controls=False)
+                card.selected.connect(self._on_sensor_card_selected)
+                self._sensor_cards[hostname] = card
+                # Insert before the stretch (last item in layout)
+                self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
+            else:
+                self._sensor_cards[hostname].update_config(config)
 
-            # Restore selection if still available
-            idx = self._sensor_combo.findText(current)
-            if idx >= 0:
-                self._sensor_combo.setCurrentIndex(idx)
-
-        self._sensor_combo.blockSignals(False)
-
-        # Update info
-        self._on_sensor_selected(self._sensor_combo.currentText())
+        # Show/hide placeholder
+        self._no_sensors_label.setVisible(len(sensors) == 0)
 
     def stop_pipeline(self) -> None:
         """Stop the pipeline (called on window close)."""
@@ -479,18 +496,23 @@ class MonitoringTabWidget(QWidget):
             self._folder_edit.setText(folder)
 
     @pyqtSlot(str)
-    def _on_sensor_selected(self, hostname: str) -> None:
-        config = self._sensors.get(hostname)
-        if config:
-            self._sensor_info.setText(f"IP: {config.ip}  |  Battery: {config.battery:.0f}%")
-        else:
-            self._sensor_info.setText("")
+    def _on_sensor_card_selected(self, hostname: str) -> None:
+        """Handle sensor card selection."""
+        # Deselect previous
+        if self._selected_hostname and self._selected_hostname in self._sensor_cards:
+            self._sensor_cards[self._selected_hostname].set_selected(False)
+
+        self._selected_hostname = hostname
+
+        # Select new
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].set_selected(True)
 
     @pyqtSlot()
     def _on_start_clicked(self) -> None:
         # Validate
-        hostname = self._sensor_combo.currentText()
-        if not hostname or hostname == "No sensors found":
+        hostname = self._selected_hostname
+        if not hostname:
             QMessageBox.warning(self, "No Sensor", "Please select a sensor first.")
             return
 
@@ -608,7 +630,8 @@ class MonitoringTabWidget(QWidget):
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         """Enable/disable configuration controls."""
-        self._sensor_combo.setEnabled(enabled)
+        for card in self._sensor_cards.values():
+            card.setEnabled(enabled)
         self._duration_spin.setEnabled(enabled)
         self._odr_combo.setEnabled(enabled)
         self._baseline_spin.setEnabled(enabled)

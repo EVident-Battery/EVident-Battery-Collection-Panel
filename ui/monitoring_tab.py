@@ -257,7 +257,7 @@ class MonitoringTabWidget(QWidget):
         save_layout.addLayout(loc_row)
 
         # Monitor radio
-        self._monitor_radio = QRadioButton("Monitor (temporary)")
+        self._monitor_radio = QRadioButton("Temporary (no save)")
         self._monitor_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._monitor_radio.setChecked(True)
         self._save_mode_group.addButton(self._monitor_radio)
@@ -888,7 +888,7 @@ class MonitoringTabWidget(QWidget):
         if save_mode == SaveMode.MONITOR:
             QMessageBox.warning(
                 self, "No Baseline Available",
-                "Monitor (temporary) mode does not retain baseline data.\n"
+                "Temporary (no save) mode does not retain baseline data.\n"
                 "Please select 'Save Location' mode with an existing baseline folder.",
             )
             return

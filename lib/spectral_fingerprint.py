@@ -680,6 +680,7 @@ class SpectralBaseline:
             'axes': {},
         }
         for name in self.psd_baseline:
+            thresholds = self.detection_thresholds(name)
             data['axes'][name] = {
                 'psd_baseline': self.psd_baseline[name].tolist(),
                 'dof_baseline': int(self.dof_baseline[name]),
@@ -687,6 +688,8 @@ class SpectralBaseline:
                 'prominence': self.prominence[name].tolist(),
                 'process_var': self.process_var[name].tolist(),
                 'floor_process_std': float(self.floor_process_std[name]),
+                'floor_threshold_db': thresholds['floor_threshold_db'],
+                'feature_threshold': thresholds['feature_threshold'],
             }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)

@@ -268,15 +268,18 @@ class MonitoringPipeline(QObject):
             self._stats.anomalies_detected += 1
             self._emit_stats()
 
-            # Log details
+            # Log details per axis
             for axis, triggered in result.triggered.items():
                 if triggered:
-                    self._log(
-                        f"ANOMALY in {short_name} [{axis}]: "
-                        f"T={result.T[axis]:.1f}/{result.T_threshold[axis]:.1f} "
-                        f"M={result.M[axis]:.1f}/{result.M_threshold[axis]:.1f}",
-                        "warning",
-                    )
+                    tiers = result.tier_triggered[axis]
+                    parts = [f"ANOMALY in {short_name} [{axis}]:"]
+                    if "floor" in tiers:
+                        parts.append(f"floor shift={result.floor_shift_db[axis]:+.1f}dB (p={result.floor_p[axis]:.2e})")
+                    if "shape" in tiers:
+                        parts.append(f"shape F={result.shape_stat[axis]:.1f} (p={result.shape_p[axis]:.2e})")
+                    if "feature" in tiers:
+                        parts.append(f"feature F={result.feature_stat[axis]:.1f} (p={result.feature_p[axis]:.2e})")
+                    self._log(" | ".join(parts), "warning")
 
             # Upload to AWS
             self._upload_anomaly(filename, result)
@@ -335,39 +338,26 @@ class MonitoringPipeline(QObject):
         self._stats.uploads_attempted += 1
         self._emit_stats()
 
-        # Build detection result dict for upload
+        # Build detection result dict for upload (three-tier format)
         detection_dict = {
             axis: {
-                "T": result.T[axis],
-                "T_threshold": result.T_threshold[axis],
-                "T_triggered": result.T_triggered[axis],
-                "M": result.M[axis],
-                "M_threshold": result.M_threshold[axis],
-                "M_triggered": result.M_triggered[axis],
+                "floor_z": result.floor_z[axis],
+                "floor_p": result.floor_p[axis],
+                "floor_shift_db": result.floor_shift_db[axis],
+                "shape_stat": result.shape_stat[axis],
+                "shape_p": result.shape_p[axis],
+                "feature_stat": result.feature_stat[axis],
+                "feature_p": result.feature_p[axis],
                 "triggered": result.triggered[axis],
+                "tier_triggered": result.tier_triggered[axis],
             }
             for axis in result.triggered
         }
 
-        thresholds_dict = {
-            axis: {
-                "T_threshold": result.T_threshold[axis],
-                "M_threshold": result.M_threshold[axis],
-            }
-            for axis in result.T_threshold
-        }
+        thresholds_dict = {"p_fa": self._config.p_fa}
 
-        # Load baseline axes locally for building detection_results.json
-        baseline_axes = {}
-        baseline_json_path = os.path.join(self._baseline_dir, "..", "baseline.json")
-        if os.path.exists(baseline_json_path):
-            try:
-                with open(baseline_json_path) as f:
-                    baseline_axes = json.load(f).get("axes", {})
-            except Exception:
-                pass
         detection_results_dict = {
-            "version": 1,
+            "version": 2,
             "sensor_id": self._config.hostname,
             "filename": Path(csv_path).name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -377,17 +367,6 @@ class MonitoringPipeline(QObject):
 
         for axis in result.triggered:
             z_arr = result.z_scores[axis]
-            t_val = result.T[axis]
-            t_thresh = result.T_threshold[axis]
-            m_val = result.M[axis]
-            m_thresh = result.M_threshold[axis]
-
-            # Reconstruct new PSD: psd_db = z_scores * scale + center
-            new_psd_db = None
-            if axis in baseline_axes:
-                center = np.array(baseline_axes[axis]["center"])
-                scale = np.array(baseline_axes[axis]["scale"])
-                new_psd_db = (z_arr * scale + center).tolist()
 
             # Top 5 deviations by absolute z-score
             top_indices = np.argsort(np.abs(z_arr))[::-1][:5]
@@ -400,18 +379,19 @@ class MonitoringPipeline(QObject):
             ]
 
             detection_results_dict["axes"][axis] = {
-                "new_psd_db": new_psd_db,
+                "new_psd_db": result.psd_new_db[axis].tolist(),
                 "z_scores": z_arr.tolist(),
                 "prominence_z": result.prominence_z[axis].tolist(),
-                "T": t_val,
-                "T_threshold": t_thresh,
-                "T_triggered": result.T_triggered[axis],
-                "T_norm": t_val / t_thresh if t_thresh else 0.0,
-                "M": m_val,
-                "M_threshold": m_thresh,
-                "M_triggered": result.M_triggered[axis],
-                "M_norm": m_val / m_thresh if m_thresh else 0.0,
+                "floor_z": result.floor_z[axis],
+                "floor_p": result.floor_p[axis],
+                "floor_shift_db": result.floor_shift_db[axis],
+                "shape_stat": result.shape_stat[axis],
+                "shape_p": result.shape_p[axis],
+                "feature_stat": result.feature_stat[axis],
+                "feature_p": result.feature_p[axis],
+                "feature_freqs": result.feature_freqs[axis],
                 "triggered": result.triggered[axis],
+                "tier_triggered": result.tier_triggered[axis],
                 "top_deviations": top_deviations,
             }
 

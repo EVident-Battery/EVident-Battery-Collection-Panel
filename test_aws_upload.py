@@ -27,7 +27,8 @@ AWS_ENDPOINT = "https://smv4232qo6.execute-api.us-east-1.amazonaws.com/prod/uplo
 
 
 def make_dummy_baseline_json() -> dict:
-    """Build a minimal but realistic baseline.json payload."""
+    """Build a minimal but realistic baseline.json payload (v2 three-tier format)."""
+    n_bins = 5  # truncated for testing
     return {
         "analyzer": {
             "fs": 104.0,
@@ -40,82 +41,84 @@ def make_dummy_baseline_json() -> dict:
         "n_phase2_frames": 5,
         "phase1_frozen": True,
         "calibrated": True,
-        "freqs": [0.0, 0.5, 1.0, 1.5, 2.0],  # truncated for testing
+        "freqs": [0.0, 0.5, 1.0, 1.5, 2.0],
         "axes": {
             "accel_x": {
-                "center": [-50.0, -48.0, -45.0, -43.0, -40.0],
-                "scale": [1.0, 1.2, 0.8, 1.1, 0.9],
-                "T_threshold": 2500.0,
-                "M_threshold": 8.5,
-                "T_nu_eff": 120.0,
-                "T_c_eff": 10.0,
+                "psd_baseline": [-50.0, -48.0, -45.0, -43.0, -40.0],
+                "dof_baseline": 10,
+                "noise_floor": [-51.0, -49.0, -46.0, -44.0, -41.0],
+                "prominence": [1.0, 1.0, 1.0, 1.0, 1.0],
+                "process_var": [0.5, 0.6, 0.4, 0.55, 0.45],
+                "floor_process_std": 0.3,
             },
             "accel_y": {
-                "center": [-52.0, -50.0, -47.0, -44.0, -42.0],
-                "scale": [1.1, 1.0, 0.9, 1.2, 1.0],
-                "T_threshold": 2400.0,
-                "M_threshold": 9.0,
-                "T_nu_eff": 115.0,
-                "T_c_eff": 10.5,
+                "psd_baseline": [-52.0, -50.0, -47.0, -44.0, -42.0],
+                "dof_baseline": 10,
+                "noise_floor": [-53.0, -51.0, -48.0, -45.0, -43.0],
+                "prominence": [1.1, 0.9, 1.0, 1.2, 1.0],
+                "process_var": [0.55, 0.5, 0.45, 0.6, 0.5],
+                "floor_process_std": 0.32,
             },
             "accel_z": {
-                "center": [-48.0, -46.0, -43.0, -41.0, -38.0],
-                "scale": [0.9, 1.1, 1.0, 0.8, 1.2],
-                "T_threshold": 2600.0,
-                "M_threshold": 8.0,
-                "T_nu_eff": 125.0,
-                "T_c_eff": 9.5,
+                "psd_baseline": [-48.0, -46.0, -43.0, -41.0, -38.0],
+                "dof_baseline": 10,
+                "noise_floor": [-49.0, -47.0, -44.0, -42.0, -39.0],
+                "prominence": [0.9, 1.1, 1.0, 0.8, 1.2],
+                "process_var": [0.45, 0.55, 0.5, 0.4, 0.6],
+                "floor_process_std": 0.28,
             },
         },
     }
 
 
 def make_dummy_detection_result() -> dict:
-    """Build a sample detection result (simulating an anomaly)."""
+    """Build a sample detection result (simulating an anomaly, three-tier format)."""
     return {
         "accel_x": {
-            "T": 3100.0,
-            "T_threshold": 2500.0,
-            "T_triggered": True,
-            "M": 6.2,
-            "M_threshold": 8.5,
-            "M_triggered": False,
+            "floor_z": 2.8,
+            "floor_p": 0.005,
+            "floor_shift_db": 3.2,
+            "shape_stat": 3.1,
+            "shape_p": 0.002,
+            "feature_stat": 1.5,
+            "feature_p": 0.12,
             "triggered": True,
+            "tier_triggered": ["floor", "shape"],
         },
         "accel_y": {
-            "T": 1800.0,
-            "T_threshold": 2400.0,
-            "T_triggered": False,
-            "M": 4.1,
-            "M_threshold": 9.0,
-            "M_triggered": False,
+            "floor_z": 0.5,
+            "floor_p": 0.62,
+            "floor_shift_db": 0.3,
+            "shape_stat": 1.1,
+            "shape_p": 0.35,
+            "feature_stat": 0.8,
+            "feature_p": 0.45,
             "triggered": False,
+            "tier_triggered": [],
         },
         "accel_z": {
-            "T": 2700.0,
-            "T_threshold": 2600.0,
-            "T_triggered": True,
-            "M": 9.5,
-            "M_threshold": 8.0,
-            "M_triggered": True,
+            "floor_z": 3.5,
+            "floor_p": 0.0004,
+            "floor_shift_db": 5.1,
+            "shape_stat": 2.8,
+            "shape_p": 0.006,
+            "feature_stat": 4.2,
+            "feature_p": 0.001,
             "triggered": True,
+            "tier_triggered": ["floor", "shape", "feature"],
         },
     }
 
 
 def make_dummy_thresholds() -> dict:
-    """Build sample thresholds dict."""
-    return {
-        "accel_x": {"T_threshold": 2500.0, "M_threshold": 8.5},
-        "accel_y": {"T_threshold": 2400.0, "M_threshold": 9.0},
-        "accel_z": {"T_threshold": 2600.0, "M_threshold": 8.0},
-    }
+    """Build sample thresholds dict (single p_fa, no per-axis thresholds)."""
+    return {"p_fa": 0.01}
 
 
 def make_dummy_detection_results_json() -> dict:
-    """Build a sample detection_results.json payload."""
+    """Build a sample detection_results.json payload (v2 three-tier format)."""
     return {
-        "version": 1,
+        "version": 2,
         "sensor_id": "test-sensor-001",
         "filename": "test_sensor_data.csv",
         "timestamp": "2026-02-12T16:00:00+00:00",
@@ -125,15 +128,16 @@ def make_dummy_detection_results_json() -> dict:
                 "new_psd_db": [-50.0 + i * 0.5 for i in range(20)],
                 "z_scores": [0.1 * i for i in range(20)],
                 "prominence_z": [0.05 * i for i in range(20)],
-                "T": 3100.0,
-                "T_threshold": 2500.0,
-                "T_triggered": True,
-                "T_norm": 1.24,
-                "M": 6.2,
-                "M_threshold": 8.5,
-                "M_triggered": False,
-                "M_norm": 0.729,
+                "floor_z": 2.8,
+                "floor_p": 0.005,
+                "floor_shift_db": 3.2,
+                "shape_stat": 3.1,
+                "shape_p": 0.002,
+                "feature_stat": 1.5,
+                "feature_p": 0.12,
+                "feature_freqs": [2.5, 5.0],
                 "triggered": True,
+                "tier_triggered": ["floor", "shape"],
                 "top_deviations": [
                     {"freq_hz": 9.5, "z_score": 1.9},
                     {"freq_hz": 9.0, "z_score": 1.8},

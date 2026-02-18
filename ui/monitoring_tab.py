@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QProgressBar, QGroupBox, QGridLayout,
     QRadioButton, QSizePolicy, QMessageBox, QScrollArea,
-    QToolButton, QTimeEdit,
+    QToolButton, QTimeEdit, QButtonGroup,
 )
 from PyQt5.QtCore import Qt, QTime, QThread, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -61,15 +61,22 @@ class LicenseCheckWorker(QThread):
                 "auth-token": self._key,
                 "evb-user-type": "customer",
             }
-            payload = {"sensor_id": "license-check", "filenames": []}
+            payload = {
+                "sensor_id": "license-check",
+                "filenames": ["baseline.json"],
+            }
             resp = requests.post(
                 self._endpoint, json=payload, headers=headers, timeout=10,
             )
-            if resp.status_code == 200:
+            if resp.status_code in (401, 403):
+                self.check_result.emit(
+                    False, f"Invalid or expired key (HTTP {resp.status_code})",
+                )
+            elif resp.status_code == 200:
                 self.check_result.emit(True, "License key is valid")
             else:
                 self.check_result.emit(
-                    False, f"Invalid key (HTTP {resp.status_code})",
+                    False, f"Unexpected response (HTTP {resp.status_code})",
                 )
         except Exception as e:
             self.check_result.emit(False, f"Connection error: {e}")
@@ -230,10 +237,12 @@ class MonitoringTabWidget(QWidget):
         save_layout.setSpacing(6)
 
         # Save Location radio + browse
+        self._save_mode_group = QButtonGroup(self)
         loc_row = QHBoxLayout()
         self._save_loc_radio = QRadioButton("Save Location")
         self._save_loc_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._save_loc_radio.toggled.connect(self._on_save_mode_changed)
+        self._save_mode_group.addButton(self._save_loc_radio)
         loc_row.addWidget(self._save_loc_radio)
 
         self._folder_edit = QLineEdit()
@@ -251,6 +260,7 @@ class MonitoringTabWidget(QWidget):
         self._monitor_radio = QRadioButton("Monitor (temporary)")
         self._monitor_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._monitor_radio.setChecked(True)
+        self._save_mode_group.addButton(self._monitor_radio)
         save_layout.addWidget(self._monitor_radio)
 
         layout.addLayout(save_layout)
@@ -309,7 +319,7 @@ class MonitoringTabWidget(QWidget):
         dur_layout = QHBoxLayout()
         self._duration_spin = QSpinBox()
         self._duration_spin.setRange(1, 200000)
-        self._duration_spin.setValue(10)
+        self._duration_spin.setValue(20)
         self._duration_spin.setSuffix(" seconds")
         self._duration_spin.setMinimumWidth(120)
         dur_layout.addWidget(self._duration_spin)
@@ -342,7 +352,7 @@ class MonitoringTabWidget(QWidget):
         self._odr_combo = QComboBox()
         for rate in SampleRate.all_rates():
             self._odr_combo.addItem(rate.display_name, rate)
-        self._odr_combo.setCurrentText("104 Hz")
+        self._odr_combo.setCurrentText("1666 Hz")
         self._odr_combo.setMinimumWidth(120)
         odr_layout.addWidget(self._odr_combo)
         odr_layout.addStretch()
@@ -410,10 +420,12 @@ class MonitoringTabWidget(QWidget):
         stop_mode_layout.setSpacing(6)
 
         # Continuous (default)
+        self._stop_mode_group = QButtonGroup(self)
         self._mon_continuous_radio = QRadioButton("Continuous")
         self._mon_continuous_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._mon_continuous_radio.setChecked(True)
         self._mon_continuous_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        self._stop_mode_group.addButton(self._mon_continuous_radio)
         stop_mode_layout.addWidget(self._mon_continuous_radio)
 
         # At time
@@ -421,6 +433,7 @@ class MonitoringTabWidget(QWidget):
         self._mon_time_radio = QRadioButton("At")
         self._mon_time_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._mon_time_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        self._stop_mode_group.addButton(self._mon_time_radio)
         time_row.addWidget(self._mon_time_radio)
 
         self._mon_stop_time_edit = QTimeEdit()
@@ -437,6 +450,7 @@ class MonitoringTabWidget(QWidget):
         self._mon_count_radio = QRadioButton("After")
         self._mon_count_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
         self._mon_count_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        self._stop_mode_group.addButton(self._mon_count_radio)
         count_row.addWidget(self._mon_count_radio)
 
         self._mon_count_spin = QSpinBox()

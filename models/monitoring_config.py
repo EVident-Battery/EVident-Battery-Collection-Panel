@@ -54,8 +54,8 @@ class MonitoringConfig:
     ip: str = ""
 
     # Collection settings
-    duration: int = 10          # seconds
-    sample_rate: float = 104.0  # Hz (ODR value)
+    duration: int = 20          # seconds
+    sample_rate: float = 1666.0  # Hz (ODR value)
 
     # Baseline
     baseline_count: int = 10

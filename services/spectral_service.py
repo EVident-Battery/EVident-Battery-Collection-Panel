@@ -83,6 +83,10 @@ class SpectralService(QObject):
     def baseline(self) -> Optional[SpectralBaseline]:
         return self._baseline
 
+    def set_baseline(self, baseline: SpectralBaseline) -> None:
+        """Set a pre-loaded baseline for detection (used by 'Continue Last Program')."""
+        self._baseline = baseline
+
     def start_training(
         self,
         folder: str,

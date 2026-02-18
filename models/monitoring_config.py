@@ -23,6 +23,13 @@ class SaveMode(Enum):
     MONITOR = "monitor"
 
 
+class MonitorStopMode(Enum):
+    """Stop mode for the monitoring phase."""
+    CONTINUOUS = "continuous"
+    AFTER_COUNT = "after_count"
+    AT_TIME = "at_time"
+
+
 @dataclass
 class MonitoringStats:
     """Live statistics for the monitoring pipeline."""
@@ -66,3 +73,14 @@ class MonitoringConfig:
 
     # Monitoring
     monitor_interval: int = 5  # seconds between monitor recordings
+
+    # Baseline timing
+    baseline_interval: int = 2  # seconds between baseline collections
+
+    # Monitor stop mode
+    monitor_stop_mode: MonitorStopMode = MonitorStopMode.CONTINUOUS
+    monitor_stop_count: int = 10
+    monitor_stop_time: object = None  # QTime, kept as object to avoid PyQt5 import
+
+    # Skip baseline (for "Continue Last Program")
+    skip_baseline: bool = False

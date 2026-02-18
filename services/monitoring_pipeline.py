@@ -11,11 +11,12 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, QTimer, QTime, pyqtSignal
 
-from models.monitoring_config import MonitoringConfig, MonitoringPhase, MonitoringStats, SaveMode
+from models.monitoring_config import MonitoringConfig, MonitoringPhase, MonitoringStats, SaveMode, MonitorStopMode
 from services.collector import CollectorService, CollectionResult
 from services.spectral_service import SpectralService
+from lib.spectral_fingerprint import SpectralBaseline
 from services.aws_monitor_upload import AWSMonitorUploadService
 
 
@@ -98,10 +99,28 @@ class MonitoringPipeline(QObject):
         os.makedirs(self._monitor_dir, exist_ok=True)
 
         self._log(f"Starting monitoring pipeline for {config.hostname}", "info")
-        self._log(f"Baseline recordings: {config.baseline_count}, Save mode: {config.save_mode.value}", "info")
 
-        self._set_phase(MonitoringPhase.BASELINE)
-        self._collect_next()
+        if config.skip_baseline:
+            # Load existing baseline and skip directly to monitoring
+            baseline_json_path = os.path.join(self._baseline_dir, "..", "baseline.json")
+            self._log(f"Loading existing baseline from {baseline_json_path}...", "info")
+            try:
+                baseline = SpectralBaseline.load(baseline_json_path)
+                self._spectral.set_baseline(baseline)
+                self._stats.baseline_collected = config.baseline_count
+                self._stats.baseline_total = config.baseline_count
+                self._emit_stats()
+                self._log("Baseline loaded successfully. Starting monitoring...", "success")
+                self._set_phase(MonitoringPhase.MONITORING)
+                self._collect_next()
+            except Exception as e:
+                self._log(f"Failed to load baseline: {e}", "error")
+                self._set_phase(MonitoringPhase.ERROR)
+                self.pipeline_complete.emit()
+        else:
+            self._log(f"Baseline recordings: {config.baseline_count}, Save mode: {config.save_mode.value}", "info")
+            self._set_phase(MonitoringPhase.BASELINE)
+            self._collect_next()
 
     def stop(self) -> None:
         """Stop the pipeline at any phase."""
@@ -189,8 +208,9 @@ class MonitoringPipeline(QObject):
                 )
                 self._start_training()
             else:
-                # Collect next baseline after short delay
-                self._next_timer.start(2000)
+                # Collect next baseline after configured interval
+                interval_ms = self._config.baseline_interval * 1000
+                self._next_timer.start(interval_ms)
 
         elif self._phase == MonitoringPhase.MONITORING:
             self._stats.monitor_collected += 1
@@ -412,9 +432,30 @@ class MonitoringPipeline(QObject):
     def _on_upload_failed(self, error: str) -> None:
         self._log(f"AWS upload failed: {error}", "error")
 
+    def _should_stop_monitoring(self) -> bool:
+        """Check if monitoring should stop based on stop mode config."""
+        if self._config is None:
+            return False
+        mode = self._config.monitor_stop_mode
+        if mode == MonitorStopMode.CONTINUOUS:
+            return False
+        elif mode == MonitorStopMode.AFTER_COUNT:
+            return self._stats.monitor_collected >= self._config.monitor_stop_count
+        elif mode == MonitorStopMode.AT_TIME:
+            if self._config.monitor_stop_time:
+                return QTime.currentTime() >= self._config.monitor_stop_time
+        return False
+
     def _schedule_next_monitor(self) -> None:
         """Schedule the next monitoring recording after the configured interval."""
         if self._phase != MonitoringPhase.MONITORING or self._config is None:
+            return
+
+        if self._should_stop_monitoring():
+            self._log("Monitor stop condition reached. Stopping pipeline.", "info")
+            self._set_phase(MonitoringPhase.STOPPED)
+            self._cleanup_temp()
+            self.pipeline_complete.emit()
             return
 
         interval_ms = self._config.monitor_interval * 1000

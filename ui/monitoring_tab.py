@@ -4,18 +4,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Optional
 
+import requests
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QProgressBar, QGroupBox, QGridLayout,
     QRadioButton, QSizePolicy, QMessageBox, QScrollArea,
+    QToolButton, QTimeEdit,
 )
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, QTime, QThread, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QFont
 
 from models.sensor_config import SensorConfig, SampleRate
-from models.monitoring_config import MonitoringConfig, MonitoringPhase, MonitoringStats, SaveMode
+from models.monitoring_config import (
+    MonitoringConfig, MonitoringPhase, MonitoringStats,
+    SaveMode, MonitorStopMode,
+)
 from services.monitoring_pipeline import MonitoringPipeline
+from services.aws_monitor_upload import AWS_ENDPOINT
 from ui.log_widget import LogWidget
 from ui.sensor_card import SensorCardWidget
 
@@ -40,6 +46,35 @@ PHASE_LABELS = {
 }
 
 
+class LicenseCheckWorker(QThread):
+    """Background worker to validate a license key against AWS."""
+    check_result = pyqtSignal(bool, str)  # (is_valid, message)
+
+    def __init__(self, license_key: str, endpoint: str) -> None:
+        super().__init__()
+        self._key = license_key
+        self._endpoint = endpoint
+
+    def run(self) -> None:
+        try:
+            headers = {
+                "auth-token": self._key,
+                "evb-user-type": "customer",
+            }
+            payload = {"sensor_id": "license-check", "filenames": []}
+            resp = requests.post(
+                self._endpoint, json=payload, headers=headers, timeout=10,
+            )
+            if resp.status_code == 200:
+                self.check_result.emit(True, "License key is valid")
+            else:
+                self.check_result.emit(
+                    False, f"Invalid key (HTTP {resp.status_code})",
+                )
+        except Exception as e:
+            self.check_result.emit(False, f"Connection error: {e}")
+
+
 class MonitoringTabWidget(QWidget):
     """Full monitoring tab UI."""
 
@@ -50,6 +85,7 @@ class MonitoringTabWidget(QWidget):
         self._sensor_cards: Dict[str, SensorCardWidget] = {}
         self._selected_hostname: Optional[str] = None
         self._pipeline = MonitoringPipeline()
+        self._license_worker: Optional[LicenseCheckWorker] = None
 
         self._setup_ui()
         self._connect_signals()
@@ -132,7 +168,7 @@ class MonitoringTabWidget(QWidget):
         group_layout.setContentsMargins(0, 8, 0, 0)
         group_layout.setSpacing(0)
 
-        # Wrap content in scroll area to handle vertical compression
+        # Wrap content in scroll area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -143,85 +179,53 @@ class MonitoringTabWidget(QWidget):
         content.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(content)
         layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        grid = QGridLayout()
-        grid.setSpacing(8)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnMinimumWidth(0, 120)
-        grid.setColumnMinimumWidth(1, 200)
-        for i in range(6):
-            grid.setRowMinimumHeight(i, 32)
+        # ========== 1. License Key ==========
+        license_header = QLabel("License Key")
+        license_header.setStyleSheet(
+            "color: #94A3B8; font-weight: bold; font-size: 12px; background: transparent;"
+        )
+        layout.addWidget(license_header)
 
-        row = 0
+        license_row = QHBoxLayout()
+        license_row.setSpacing(6)
+        self._license_edit = QLineEdit()
+        self._license_edit.setPlaceholderText("Enter license key for AWS uploads")
+        self._license_edit.setEchoMode(QLineEdit.Password)
+        license_row.addWidget(self._license_edit, 1)
 
-        # Duration
-        lbl = QLabel("Duration:")
-        lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0)
-        dur_layout = QHBoxLayout()
-        self._duration_spin = QSpinBox()
-        self._duration_spin.setRange(1, 200000)
-        self._duration_spin.setValue(10)
-        self._duration_spin.setSuffix(" seconds")
-        self._duration_spin.setMinimumWidth(120)
-        dur_layout.addWidget(self._duration_spin)
-        dur_layout.addStretch()
-        grid.addLayout(dur_layout, row, 1)
+        self._license_check_btn = QPushButton("Check")
+        self._license_check_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #E2E8F0;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #475569; }
+            QPushButton:disabled { background-color: #1E293B; color: #64748B; }
+        """)
+        self._license_check_btn.clicked.connect(self._on_check_license)
+        license_row.addWidget(self._license_check_btn)
 
-        row += 1
+        self._license_status_label = QLabel("")
+        self._license_status_label.setFixedWidth(24)
+        self._license_status_label.setAlignment(Qt.AlignCenter)
+        self._license_status_label.setStyleSheet("background: transparent;")
+        license_row.addWidget(self._license_status_label)
 
-        # Sample Rate
-        lbl = QLabel("Sample Rate:")
-        lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0)
-        odr_layout = QHBoxLayout()
-        self._odr_combo = QComboBox()
-        for rate in SampleRate.all_rates():
-            self._odr_combo.addItem(rate.display_name, rate)
-        self._odr_combo.setCurrentText("104 Hz")
-        self._odr_combo.setMinimumWidth(120)
-        odr_layout.addWidget(self._odr_combo)
-        odr_layout.addStretch()
-        grid.addLayout(odr_layout, row, 1)
+        layout.addLayout(license_row)
 
-        row += 1
+        # ========== 2. Save Mode ==========
+        save_header = QLabel("Save Mode")
+        save_header.setStyleSheet(
+            "color: #94A3B8; font-weight: bold; font-size: 12px; background: transparent;"
+        )
+        layout.addWidget(save_header)
 
-        # Baseline Runs
-        lbl = QLabel("Baseline Runs:")
-        lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0)
-        bl_layout = QHBoxLayout()
-        self._baseline_spin = QSpinBox()
-        self._baseline_spin.setRange(2, 1000)
-        self._baseline_spin.setValue(10)
-        self._baseline_spin.setMinimumWidth(80)
-        bl_layout.addWidget(self._baseline_spin)
-        bl_layout.addStretch()
-        grid.addLayout(bl_layout, row, 1)
-
-        row += 1
-
-        # Monitor Interval
-        lbl = QLabel("Monitor Interval:")
-        lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0)
-        mi_layout = QHBoxLayout()
-        self._interval_spin = QSpinBox()
-        self._interval_spin.setRange(1, 3600)
-        self._interval_spin.setValue(5)
-        self._interval_spin.setSuffix(" seconds")
-        self._interval_spin.setMinimumWidth(120)
-        mi_layout.addWidget(self._interval_spin)
-        mi_layout.addStretch()
-        grid.addLayout(mi_layout, row, 1)
-
-        row += 1
-
-        # Save Location section
-        lbl = QLabel("Save Mode:")
-        lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0, Qt.AlignTop)
         save_layout = QVBoxLayout()
         save_layout.setSpacing(6)
 
@@ -249,20 +253,208 @@ class MonitoringTabWidget(QWidget):
         self._monitor_radio.setChecked(True)
         save_layout.addWidget(self._monitor_radio)
 
-        grid.addLayout(save_layout, row, 1)
+        layout.addLayout(save_layout)
+
+        # ========== 3. Learn Settings (collapsible, collapsed by default) ==========
+        # Separator
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.HLine)
+        sep1.setStyleSheet("background-color: #334155;")
+        sep1.setFixedHeight(1)
+        layout.addWidget(sep1)
+
+        learn_header_layout = QHBoxLayout()
+        learn_header_layout.setSpacing(4)
+
+        self._learn_toggle_btn = QToolButton()
+        self._learn_toggle_btn.setArrowType(Qt.RightArrow)
+        self._learn_toggle_btn.setStyleSheet("""
+            QToolButton {
+                border: none;
+                background: transparent;
+                color: #94A3B8;
+            }
+            QToolButton:hover { color: #E2E8F0; }
+        """)
+        self._learn_toggle_btn.clicked.connect(self._on_toggle_learn_settings)
+        learn_header_layout.addWidget(self._learn_toggle_btn)
+
+        learn_title = QLabel("Learn Settings")
+        learn_title.setStyleSheet(
+            "color: #94A3B8; font-weight: bold; font-size: 12px; "
+            "background: transparent;"
+        )
+        learn_title.setCursor(Qt.PointingHandCursor)
+        learn_title.mousePressEvent = lambda _event: self._on_toggle_learn_settings()
+        learn_header_layout.addWidget(learn_title)
+        learn_header_layout.addStretch()
+        layout.addLayout(learn_header_layout)
+
+        # Collapsible content
+        self._learn_content = QWidget()
+        self._learn_content.setStyleSheet("background: transparent;")
+        self._learn_content.setVisible(False)  # collapsed by default
+
+        learn_grid = QGridLayout(self._learn_content)
+        learn_grid.setSpacing(8)
+        learn_grid.setColumnStretch(1, 1)
+        learn_grid.setColumnMinimumWidth(0, 120)
+
+        row = 0
+
+        # Duration
+        lbl = QLabel("Duration:")
+        lbl.setStyleSheet("background: transparent;")
+        learn_grid.addWidget(lbl, row, 0)
+        dur_layout = QHBoxLayout()
+        self._duration_spin = QSpinBox()
+        self._duration_spin.setRange(1, 200000)
+        self._duration_spin.setValue(10)
+        self._duration_spin.setSuffix(" seconds")
+        self._duration_spin.setMinimumWidth(120)
+        dur_layout.addWidget(self._duration_spin)
+        dur_layout.addStretch()
+        learn_grid.addLayout(dur_layout, row, 1)
 
         row += 1
 
-        # License Key
-        lbl = QLabel("License Key:")
+        # Baseline Interval (NEW)
+        lbl = QLabel("Baseline Interval:")
         lbl.setStyleSheet("background: transparent;")
-        grid.addWidget(lbl, row, 0)
-        self._license_edit = QLineEdit()
-        self._license_edit.setPlaceholderText("Enter license key for AWS uploads")
-        self._license_edit.setEchoMode(QLineEdit.Password)
-        grid.addWidget(self._license_edit, row, 1)
+        learn_grid.addWidget(lbl, row, 0)
+        bi_layout = QHBoxLayout()
+        self._baseline_interval_spin = QSpinBox()
+        self._baseline_interval_spin.setRange(1, 3600)
+        self._baseline_interval_spin.setValue(2)
+        self._baseline_interval_spin.setSuffix(" seconds")
+        self._baseline_interval_spin.setMinimumWidth(120)
+        bi_layout.addWidget(self._baseline_interval_spin)
+        bi_layout.addStretch()
+        learn_grid.addLayout(bi_layout, row, 1)
 
-        layout.addLayout(grid)
+        row += 1
+
+        # Sample Rate
+        lbl = QLabel("Sample Rate:")
+        lbl.setStyleSheet("background: transparent;")
+        learn_grid.addWidget(lbl, row, 0)
+        odr_layout = QHBoxLayout()
+        self._odr_combo = QComboBox()
+        for rate in SampleRate.all_rates():
+            self._odr_combo.addItem(rate.display_name, rate)
+        self._odr_combo.setCurrentText("104 Hz")
+        self._odr_combo.setMinimumWidth(120)
+        odr_layout.addWidget(self._odr_combo)
+        odr_layout.addStretch()
+        learn_grid.addLayout(odr_layout, row, 1)
+
+        row += 1
+
+        # Baseline Runs
+        lbl = QLabel("Baseline Runs:")
+        lbl.setStyleSheet("background: transparent;")
+        learn_grid.addWidget(lbl, row, 0)
+        bl_layout = QHBoxLayout()
+        self._baseline_spin = QSpinBox()
+        self._baseline_spin.setRange(2, 1000)
+        self._baseline_spin.setValue(10)
+        self._baseline_spin.setMinimumWidth(80)
+        bl_layout.addWidget(self._baseline_spin)
+        bl_layout.addStretch()
+        learn_grid.addLayout(bl_layout, row, 1)
+
+        layout.addWidget(self._learn_content)
+
+        # ========== 4. Monitor Settings (always visible) ==========
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet("background-color: #334155;")
+        sep2.setFixedHeight(1)
+        layout.addWidget(sep2)
+
+        monitor_header = QLabel("Monitor Settings")
+        monitor_header.setStyleSheet(
+            "color: #94A3B8; font-weight: bold; font-size: 12px; background: transparent;"
+        )
+        layout.addWidget(monitor_header)
+
+        monitor_grid = QGridLayout()
+        monitor_grid.setSpacing(8)
+        monitor_grid.setColumnStretch(1, 1)
+        monitor_grid.setColumnMinimumWidth(0, 120)
+
+        row = 0
+
+        # Monitor Interval
+        lbl = QLabel("Monitor Interval:")
+        lbl.setStyleSheet("background: transparent;")
+        monitor_grid.addWidget(lbl, row, 0)
+        mi_layout = QHBoxLayout()
+        self._interval_spin = QSpinBox()
+        self._interval_spin.setRange(1, 3600)
+        self._interval_spin.setValue(5)
+        self._interval_spin.setSuffix(" seconds")
+        self._interval_spin.setMinimumWidth(120)
+        mi_layout.addWidget(self._interval_spin)
+        mi_layout.addStretch()
+        monitor_grid.addLayout(mi_layout, row, 1)
+
+        row += 1
+
+        # Stop Mode
+        lbl = QLabel("Stop Mode:")
+        lbl.setStyleSheet("background: transparent;")
+        monitor_grid.addWidget(lbl, row, 0, Qt.AlignTop)
+
+        stop_mode_layout = QVBoxLayout()
+        stop_mode_layout.setSpacing(6)
+
+        # Continuous (default)
+        self._mon_continuous_radio = QRadioButton("Continuous")
+        self._mon_continuous_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
+        self._mon_continuous_radio.setChecked(True)
+        self._mon_continuous_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        stop_mode_layout.addWidget(self._mon_continuous_radio)
+
+        # At time
+        time_row = QHBoxLayout()
+        self._mon_time_radio = QRadioButton("At")
+        self._mon_time_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
+        self._mon_time_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        time_row.addWidget(self._mon_time_radio)
+
+        self._mon_stop_time_edit = QTimeEdit()
+        self._mon_stop_time_edit.setDisplayFormat("hh:mm AP")
+        self._mon_stop_time_edit.setTime(QTime(17, 0))
+        self._mon_stop_time_edit.setEnabled(False)
+        self._mon_stop_time_edit.setStyleSheet("background-color: #1E3A5F; color: #64748B;")
+        time_row.addWidget(self._mon_stop_time_edit)
+        time_row.addStretch()
+        stop_mode_layout.addLayout(time_row)
+
+        # After count
+        count_row = QHBoxLayout()
+        self._mon_count_radio = QRadioButton("After")
+        self._mon_count_radio.setStyleSheet("color: #CBD5E1; background: transparent;")
+        self._mon_count_radio.toggled.connect(self._on_monitor_stop_mode_changed)
+        count_row.addWidget(self._mon_count_radio)
+
+        self._mon_count_spin = QSpinBox()
+        self._mon_count_spin.setRange(1, 9999)
+        self._mon_count_spin.setValue(10)
+        self._mon_count_spin.setMinimumWidth(70)
+        self._mon_count_spin.setEnabled(False)
+        count_row.addWidget(self._mon_count_spin)
+
+        count_suffix = QLabel("collections")
+        count_suffix.setStyleSheet("background: transparent; color: #CBD5E1;")
+        count_row.addWidget(count_suffix)
+        count_row.addStretch()
+        stop_mode_layout.addLayout(count_row)
+
+        monitor_grid.addLayout(stop_mode_layout, row, 1)
+
+        layout.addLayout(monitor_grid)
         layout.addStretch()
 
         # Add content widget to scroll area, scroll area to group
@@ -286,8 +478,9 @@ class MonitoringTabWidget(QWidget):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(12, 8, 12, 8)
 
-        self._start_btn = QPushButton("Start Monitoring")
-        self._start_btn.setStyleSheet("""
+        # Start New Program button (green)
+        self._start_new_btn = QPushButton("Start New Program")
+        self._start_new_btn.setStyleSheet("""
             QPushButton {
                 background-color: #059669;
                 color: white;
@@ -304,8 +497,30 @@ class MonitoringTabWidget(QWidget):
                 color: #64748B;
             }
         """)
-        self._start_btn.clicked.connect(self._on_start_clicked)
-        layout.addWidget(self._start_btn)
+        self._start_new_btn.clicked.connect(self._on_start_new_clicked)
+        layout.addWidget(self._start_new_btn)
+
+        # Continue Last Program button (blue)
+        self._continue_btn = QPushButton("Continue Last Program")
+        self._continue_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 24px;
+            }
+            QPushButton:hover { background-color: #60A5FA; }
+            QPushButton:pressed { background-color: #2563EB; }
+            QPushButton:disabled {
+                background-color: #1E3A5F;
+                color: #64748B;
+            }
+        """)
+        self._continue_btn.clicked.connect(self._on_continue_clicked)
+        layout.addWidget(self._continue_btn)
 
         layout.addStretch()
 
@@ -509,35 +724,109 @@ class MonitoringTabWidget(QWidget):
             self._sensor_cards[hostname].set_selected(True)
 
     @pyqtSlot()
-    def _on_start_clicked(self) -> None:
-        # Validate
+    def _on_toggle_learn_settings(self) -> None:
+        is_visible = self._learn_content.isVisible()
+        self._learn_content.setVisible(not is_visible)
+        self._learn_toggle_btn.setArrowType(
+            Qt.DownArrow if not is_visible else Qt.RightArrow
+        )
+
+    @pyqtSlot()
+    def _on_check_license(self) -> None:
+        key = self._license_edit.text().strip()
+        if not key:
+            self._license_status_label.setText("!")
+            self._license_status_label.setStyleSheet(
+                "color: #DC2626; font-weight: bold; font-size: 16px; background: transparent;"
+            )
+            return
+
+        self._license_check_btn.setEnabled(False)
+        self._license_status_label.setText("...")
+        self._license_status_label.setStyleSheet(
+            "color: #94A3B8; background: transparent;"
+        )
+
+        self._license_worker = LicenseCheckWorker(key, AWS_ENDPOINT)
+        self._license_worker.check_result.connect(self._on_license_result)
+        self._license_worker.finished.connect(
+            lambda: self._license_check_btn.setEnabled(True)
+        )
+        self._license_worker.start()
+
+    @pyqtSlot(bool, str)
+    def _on_license_result(self, is_valid: bool, message: str) -> None:
+        if is_valid:
+            self._license_status_label.setText("\u2713")
+            self._license_status_label.setStyleSheet(
+                "color: #059669; font-size: 16px; font-weight: bold; background: transparent;"
+            )
+        else:
+            self._license_status_label.setText("\u2717")
+            self._license_status_label.setStyleSheet(
+                "color: #DC2626; font-size: 16px; font-weight: bold; background: transparent;"
+            )
+
+    @pyqtSlot()
+    def _on_monitor_stop_mode_changed(self) -> None:
+        count_enabled = self._mon_count_radio.isChecked()
+        time_enabled = self._mon_time_radio.isChecked()
+
+        self._mon_count_spin.setEnabled(count_enabled)
+        self._mon_stop_time_edit.setEnabled(time_enabled)
+
+        self._mon_stop_time_edit.setStyleSheet(
+            "background-color: #1E3A5F; color: #E2E8F0;"
+            if time_enabled else
+            "background-color: #1E3A5F; color: #64748B;"
+        )
+
+    def _build_config(self, skip_baseline: bool) -> Optional[MonitoringConfig]:
+        """Build MonitoringConfig from UI state. Returns None if validation fails."""
         hostname = self._selected_hostname
         if not hostname:
             QMessageBox.warning(self, "No Sensor", "Please select a sensor first.")
-            return
+            return None
 
         sensor = self._sensors.get(hostname)
         if not sensor:
-            QMessageBox.warning(self, "Invalid Sensor", "Selected sensor is no longer available.")
-            return
+            QMessageBox.warning(
+                self, "Invalid Sensor", "Selected sensor is no longer available.",
+            )
+            return None
 
         baseline_count = self._baseline_spin.value()
-        if baseline_count < 2:
-            QMessageBox.warning(self, "Invalid Config", "Baseline runs must be at least 2.")
-            return
+        if baseline_count < 2 and not skip_baseline:
+            QMessageBox.warning(
+                self, "Invalid Config", "Baseline runs must be at least 2.",
+            )
+            return None
 
-        save_mode = SaveMode.SAVE_LOCATION if self._save_loc_radio.isChecked() else SaveMode.MONITOR
+        save_mode = (
+            SaveMode.SAVE_LOCATION if self._save_loc_radio.isChecked()
+            else SaveMode.MONITOR
+        )
         save_folder = None
         if save_mode == SaveMode.SAVE_LOCATION:
             folder_text = self._folder_edit.text().strip()
             if not folder_text or not Path(folder_text).is_dir():
-                QMessageBox.warning(self, "No Folder", "Please select a valid save folder.")
-                return
+                QMessageBox.warning(
+                    self, "No Folder", "Please select a valid save folder.",
+                )
+                return None
             save_folder = Path(folder_text)
 
         odr = self._odr_combo.currentData()
 
-        config = MonitoringConfig(
+        # Determine monitor stop mode
+        if self._mon_continuous_radio.isChecked():
+            stop_mode = MonitorStopMode.CONTINUOUS
+        elif self._mon_time_radio.isChecked():
+            stop_mode = MonitorStopMode.AT_TIME
+        else:
+            stop_mode = MonitorStopMode.AFTER_COUNT
+
+        return MonitoringConfig(
             hostname=hostname,
             ip=sensor.ip,
             duration=self._duration_spin.value(),
@@ -547,17 +836,69 @@ class MonitoringTabWidget(QWidget):
             save_folder=save_folder,
             license_key=self._license_edit.text().strip(),
             monitor_interval=self._interval_spin.value(),
+            baseline_interval=self._baseline_interval_spin.value(),
+            monitor_stop_mode=stop_mode,
+            monitor_stop_count=self._mon_count_spin.value(),
+            monitor_stop_time=(
+                self._mon_stop_time_edit.time()
+                if stop_mode == MonitorStopMode.AT_TIME else None
+            ),
+            skip_baseline=skip_baseline,
         )
 
-        # Disable controls
+    def _start_pipeline(self, config: MonitoringConfig) -> None:
+        """Common start logic for both start buttons."""
         self._set_controls_enabled(False)
-        self._start_btn.setEnabled(False)
+        self._start_new_btn.setEnabled(False)
+        self._continue_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
-
-        # Clear log
         self._log_widget.clear()
-
         self._pipeline.start(config)
+
+    @pyqtSlot()
+    def _on_start_new_clicked(self) -> None:
+        """Start monitoring from scratch (baseline -> training -> monitoring)."""
+        config = self._build_config(skip_baseline=False)
+        if config is None:
+            return
+        self._start_pipeline(config)
+
+    @pyqtSlot()
+    def _on_continue_clicked(self) -> None:
+        """Skip baseline, load existing baseline.json, go straight to monitoring."""
+        save_mode = (
+            SaveMode.SAVE_LOCATION if self._save_loc_radio.isChecked()
+            else SaveMode.MONITOR
+        )
+
+        if save_mode == SaveMode.MONITOR:
+            QMessageBox.warning(
+                self, "No Baseline Available",
+                "Monitor (temporary) mode does not retain baseline data.\n"
+                "Please select 'Save Location' mode with an existing baseline folder.",
+            )
+            return
+
+        folder_text = self._folder_edit.text().strip()
+        if not folder_text:
+            QMessageBox.warning(
+                self, "No Folder", "Please select a save folder first.",
+            )
+            return
+
+        baseline_path = Path(folder_text) / "baseline.json"
+        if not baseline_path.exists():
+            QMessageBox.warning(
+                self, "No Baseline Found",
+                f"No baseline.json found in:\n{folder_text}\n\n"
+                "Run 'Start New Program' first to create a baseline.",
+            )
+            return
+
+        config = self._build_config(skip_baseline=True)
+        if config is None:
+            return
+        self._start_pipeline(config)
 
     @pyqtSlot()
     def _on_stop_clicked(self) -> None:
@@ -625,7 +966,8 @@ class MonitoringTabWidget(QWidget):
     @pyqtSlot()
     def _on_pipeline_complete(self) -> None:
         self._set_controls_enabled(True)
-        self._start_btn.setEnabled(True)
+        self._start_new_btn.setEnabled(True)
+        self._continue_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
@@ -635,12 +977,20 @@ class MonitoringTabWidget(QWidget):
         self._duration_spin.setEnabled(enabled)
         self._odr_combo.setEnabled(enabled)
         self._baseline_spin.setEnabled(enabled)
+        self._baseline_interval_spin.setEnabled(enabled)
         self._interval_spin.setEnabled(enabled)
         self._save_loc_radio.setEnabled(enabled)
         self._monitor_radio.setEnabled(enabled)
         self._license_edit.setEnabled(enabled)
+        self._license_check_btn.setEnabled(enabled)
+        self._mon_continuous_radio.setEnabled(enabled)
+        self._mon_count_radio.setEnabled(enabled)
+        self._mon_time_radio.setEnabled(enabled)
         if enabled:
             self._on_save_mode_changed()
+            self._on_monitor_stop_mode_changed()
         else:
             self._folder_edit.setEnabled(False)
             self._browse_btn.setEnabled(False)
+            self._mon_count_spin.setEnabled(False)
+            self._mon_stop_time_edit.setEnabled(False)

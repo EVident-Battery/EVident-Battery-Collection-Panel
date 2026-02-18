@@ -637,6 +637,35 @@ class SpectralBaseline:
             tier_triggered=tier_triggered,
         )
 
+    def detection_thresholds(self, name: str) -> dict:
+        """Compute approximate detection thresholds for an axis.
+
+        Returns dict with 'floor_threshold_db' and 'feature_threshold'.
+        """
+        from scipy.stats import norm
+        from scipy.special import polygamma
+
+        p_tier = self.p_fa / 3.0
+        n_bins = len(self.freqs)
+
+        # Feature threshold (exact)
+        n_eff = max(1, int(n_bins / self._bin_correlation_factor / 2))
+        p_single = 1 - (1 - p_tier) ** (1.0 / n_eff)
+        feature_thresh = float(norm.isf(p_single / 2))
+
+        # Floor threshold in dB (approximate, assumes new DOF ≈ baseline DOF)
+        z_crit = float(norm.ppf(1 - p_tier / 2))
+        var_chi2 = self._bin_correlation_factor / n_bins
+        var_proc = self.floor_process_std.get(name, 0.0) ** 2
+        z_floor_thresh = z_crit * np.sqrt(var_chi2 + var_proc)
+
+        nu_b = self.dof_baseline[name]
+        pv = self.process_var.get(name, np.zeros(n_bins))
+        sigma_avg = float(np.sqrt(2.0 * polygamma(1, nu_b / 2.0) + np.mean(pv)))
+        floor_thresh_db = float(10.0 / np.log(10) * z_floor_thresh * sigma_avg)
+
+        return {'floor_threshold_db': floor_thresh_db, 'feature_threshold': feature_thresh}
+
     # --- Serialization ---
 
     def save(self, path: str):
@@ -1212,6 +1241,16 @@ def plot_summary(results: list[tuple[str, DetectionResult]],
                        textcoords='offset points', xytext=(4, 4))
 
         ax.axvline(0, color='gray', ls='-', alpha=0.3)
+
+        # Detection threshold lines
+        thresholds = baseline.detection_thresholds(name)
+        ft_db = thresholds['floor_threshold_db']
+        feat_t = thresholds['feature_threshold']
+        ax.axvline(-ft_db, color='red', ls='--', alpha=0.4, lw=1)
+        ax.axvline(ft_db, color='red', ls='--', alpha=0.4, lw=1, label=f'Floor \u00b1{ft_db:.1f} dB')
+        ax.axhline(feat_t, color='orange', ls='--', alpha=0.4, lw=1, label=f'Feature {feat_t:.1f}')
+        ax.legend(fontsize=6, loc='upper left')
+
         ax.set_xlabel('Floor shift (dB)')
         ax.set_ylabel('Feature max |z|')
         ax.set_title(f'{name} — Detection Space')

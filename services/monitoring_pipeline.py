@@ -365,6 +365,16 @@ class MonitoringPipeline(QObject):
             "axes": {},
         }
 
+        # Add per-axis detection thresholds
+        baseline = self._spectral.baseline
+        if baseline:
+            thresholds_per_axis = {}
+            for axis in result.triggered:
+                t = baseline.detection_thresholds(axis)
+                thresholds_per_axis[axis] = t
+            detection_results_dict["thresholds"] = thresholds_per_axis
+            detection_results_dict["thresholds"]["p_fa"] = baseline.p_fa
+
         for axis in result.triggered:
             z_arr = result.z_scores[axis]
 

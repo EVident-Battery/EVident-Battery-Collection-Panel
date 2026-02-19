@@ -694,6 +694,35 @@ class SpectralBaseline:
             tier_triggered=tier_triggered,
         )
 
+    def detection_thresholds(self, name: str) -> dict:
+        """Compute approximate detection thresholds for an axis.
+
+        Returns dict with 'floor_threshold_db' and 'feature_threshold'.
+        """
+        from scipy.stats import norm
+        from scipy.special import polygamma
+
+        p_tier = self.p_fa / 3.0
+        n_bins = len(self.freqs)
+
+        # Feature threshold (exact)
+        n_eff = max(1, int(n_bins / self._bin_correlation_factor / 2))
+        p_single = 1 - (1 - p_tier) ** (1.0 / n_eff)
+        feature_thresh = float(norm.isf(p_single / 2))
+
+        # Floor threshold in dB (approximate, assumes new DOF ≈ baseline DOF)
+        z_crit = float(norm.ppf(1 - p_tier / 2))
+        var_chi2 = self._bin_correlation_factor / n_bins
+        var_proc = self.floor_process_std.get(name, 0.0) ** 2
+        z_floor_thresh = z_crit * np.sqrt(var_chi2 + var_proc)
+
+        nu_b = self.dof_baseline[name]
+        pv = self.process_var.get(name, np.zeros(n_bins))
+        sigma_avg = float(np.sqrt(2.0 * polygamma(1, nu_b / 2.0) + np.mean(pv)))
+        floor_thresh_db = float(10.0 / np.log(10) * z_floor_thresh * sigma_avg)
+
+        return {'floor_threshold_db': floor_thresh_db, 'feature_threshold': feature_thresh}
+
     # --- Serialization ---
 
     def save(self, path: str):
@@ -708,6 +737,7 @@ class SpectralBaseline:
             'axes': {},
         }
         for name in self.psd_baseline:
+            thresholds = self.detection_thresholds(name)
             data['axes'][name] = {
                 'psd_baseline': self.psd_baseline[name].tolist(),
                 'dof_baseline': int(self.dof_baseline[name]),
@@ -716,6 +746,8 @@ class SpectralBaseline:
                 'process_var': self.process_var[name].tolist(),
                 'floor_process_std': float(self.floor_process_std[name]),
                 'shape_process_std': self.shape_process_std[name].tolist(),
+                'floor_threshold_db': thresholds['floor_threshold_db'],
+                'feature_threshold': thresholds['feature_threshold'],
             }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)

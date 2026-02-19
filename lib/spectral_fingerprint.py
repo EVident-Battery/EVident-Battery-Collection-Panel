@@ -282,6 +282,7 @@ class SpectralBaseline:
         # Process variance (measured from baseline recordings)
         self.process_var: dict[str, np.ndarray] = {}   # per-bin excess variance
         self.floor_process_std: dict[str, float] = {}  # broadband level jitter
+        self.shape_process_std: dict[str, np.ndarray] = {}  # smooth-scale jitter per bin
 
         self._frozen = False
 
@@ -465,6 +466,46 @@ class SpectralBaseline:
                         self.process_var[name])
             self.scale[name] = np.sqrt(total_var) * 10.0 / np.log(10)
 
+        # ── Shape process variance ──
+        #
+        # Compute z_shape_normalized for each baseline recording and
+        # measure per-bin std.  Where it exceeds 1.0 (the chi-squared
+        # expectation), the excess is smooth-scale process jitter.
+        mw = self.analyzer.median_window
+        shape_bin_var = self._bin_correlation_factor / mw
+
+        for name in self.psd_baseline:
+            n_rec = len(self._per_recording_log_psd.get(name, []))
+            if n_rec >= 3:
+                log_pooled = np.log(self.psd_baseline[name] + 1e-30)
+                all_z_shape_norm = []
+                for i in range(n_rec):
+                    lp = self._per_recording_log_psd[name][i]
+                    dof_i = self._per_recording_dof[name][i]
+                    # Per-bin z-score for this recording
+                    lr = lp - log_pooled
+                    bias_i = ((digamma(dof_i / 2.0) - np.log(dof_i / 2.0)) -
+                              (digamma(self.dof_baseline[name] / 2.0) -
+                               np.log(self.dof_baseline[name] / 2.0)))
+                    var_i = (polygamma(1, dof_i / 2.0) +
+                             polygamma(1, self.dof_baseline[name] / 2.0) +
+                             self.process_var[name])
+                    z_i = (lr - bias_i) / np.sqrt(var_i)
+                    # Decompose
+                    z_smooth_i = median_filter(z_i, size=mw)
+                    z_floor_i = np.mean(z_i)
+                    z_shape_i = z_smooth_i - z_floor_i
+                    z_shape_norm_i = z_shape_i / np.sqrt(shape_bin_var)
+                    all_z_shape_norm.append(z_shape_norm_i)
+
+                all_zsn = np.array(all_z_shape_norm)
+                # Per-bin std; floor at 1.0 (theoretical minimum)
+                self.shape_process_std[name] = np.maximum(
+                    np.std(all_zsn, axis=0, ddof=1), 1.0
+                )
+            else:
+                self.shape_process_std[name] = np.ones(len(self.freqs))
+
         self._frozen = True
         self._psd_weighted_sum = {}
         self._per_recording_log_psd = {}
@@ -563,24 +604,29 @@ class SpectralBaseline:
                 10.0 * np.mean(log_ratio) / np.log(10)
             )
 
-            # ── Tier 2: Shape (prominence-weighted spectral change) ──
-            w = np.maximum(self.prominence_db[name], 0.0)
-            w_sum = w.sum()
-            if w_sum < 1e-10:
-                w = np.ones(len(z))
-                w_sum = w.sum()
-            w_norm = w / w_sum
-
+            # ── Tier 2: Shape (spectral tilt / curvature change) ──
+            #
+            # The median filter produces ~N_bins/median_window smooth
+            # components, each with variance ≈ bin_corr/median_window.
+            # Normalizing and dividing by the measured shape process std
+            # gives approximately N(0,1) under H₀.
+            # Use max|z_shape_final| with Šidák correction.
             shape_bin_var = self._bin_correlation_factor / median_window
-            T_shape = float(np.sum(w_norm * z_shape_component ** 2))
-            T_shape_norm = T_shape / shape_bin_var
+            z_shape_normalized = z_shape_component / np.sqrt(shape_bin_var)
+            shape_std = self.shape_process_std.get(
+                name, np.ones(len(z))
+            )
+            z_shape_final = z_shape_normalized / shape_std
+            max_z_shape = float(np.max(np.abs(z_shape_final)))
+            n_eff_shape = max(1, int(
+                len(z) / median_window / self._bin_correlation_factor
+            ))
 
-            c_shape = float(np.sum(w_norm ** 2))
-            nu_eff_shape = max(1.0, 1.0 / (c_shape + 1e-30) /
-                               self._bin_correlation_factor)
-            shape_stat[name] = T_shape_norm
-            shape_p[name] = float(1.0 - chi2.cdf(T_shape_norm, nu_eff_shape))
-            shape_nu_eff[name] = nu_eff_shape
+            shape_stat[name] = max_z_shape
+            p_single_shape = 2.0 * norm.sf(max_z_shape)
+            shape_p[name] = float(min(1.0,
+                1.0 - (1.0 - p_single_shape) ** n_eff_shape))
+            shape_nu_eff[name] = float(n_eff_shape)
 
             # ── Tier 3: Feature (peak-scale anomalies) ──
             #
@@ -637,35 +683,6 @@ class SpectralBaseline:
             tier_triggered=tier_triggered,
         )
 
-    def detection_thresholds(self, name: str) -> dict:
-        """Compute approximate detection thresholds for an axis.
-
-        Returns dict with 'floor_threshold_db' and 'feature_threshold'.
-        """
-        from scipy.stats import norm
-        from scipy.special import polygamma
-
-        p_tier = self.p_fa / 3.0
-        n_bins = len(self.freqs)
-
-        # Feature threshold (exact)
-        n_eff = max(1, int(n_bins / self._bin_correlation_factor / 2))
-        p_single = 1 - (1 - p_tier) ** (1.0 / n_eff)
-        feature_thresh = float(norm.isf(p_single / 2))
-
-        # Floor threshold in dB (approximate, assumes new DOF ≈ baseline DOF)
-        z_crit = float(norm.ppf(1 - p_tier / 2))
-        var_chi2 = self._bin_correlation_factor / n_bins
-        var_proc = self.floor_process_std.get(name, 0.0) ** 2
-        z_floor_thresh = z_crit * np.sqrt(var_chi2 + var_proc)
-
-        nu_b = self.dof_baseline[name]
-        pv = self.process_var.get(name, np.zeros(n_bins))
-        sigma_avg = float(np.sqrt(2.0 * polygamma(1, nu_b / 2.0) + np.mean(pv)))
-        floor_thresh_db = float(10.0 / np.log(10) * z_floor_thresh * sigma_avg)
-
-        return {'floor_threshold_db': floor_thresh_db, 'feature_threshold': feature_thresh}
-
     # --- Serialization ---
 
     def save(self, path: str):
@@ -680,7 +697,6 @@ class SpectralBaseline:
             'axes': {},
         }
         for name in self.psd_baseline:
-            thresholds = self.detection_thresholds(name)
             data['axes'][name] = {
                 'psd_baseline': self.psd_baseline[name].tolist(),
                 'dof_baseline': int(self.dof_baseline[name]),
@@ -688,8 +704,7 @@ class SpectralBaseline:
                 'prominence': self.prominence[name].tolist(),
                 'process_var': self.process_var[name].tolist(),
                 'floor_process_std': float(self.floor_process_std[name]),
-                'floor_threshold_db': thresholds['floor_threshold_db'],
-                'feature_threshold': thresholds['feature_threshold'],
+                'shape_process_std': self.shape_process_std[name].tolist(),
             }
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
@@ -730,9 +745,13 @@ class SpectralBaseline:
             if 'process_var' in entry:
                 bl.process_var[name] = np.array(entry['process_var'])
                 bl.floor_process_std[name] = entry['floor_process_std']
+                bl.shape_process_std[name] = np.array(
+                    entry.get('shape_process_std', np.ones(len(psd)).tolist())
+                )
             else:
                 bl.process_var[name] = np.zeros(len(psd))
                 bl.floor_process_std[name] = 0.0
+                bl.shape_process_std[name] = np.ones(len(psd))
 
             # Backward-compat scale (includes process variance)
             nu_typical = 32
@@ -782,6 +801,7 @@ class SpectralBaseline:
             bl.scale[name] = scale_db
             bl.process_var[name] = np.zeros(len(psd_linear))
             bl.floor_process_std[name] = 0.0
+            bl.shape_process_std[name] = np.ones(len(psd_linear))
 
         print(f"  Note: loaded legacy MAD-based baseline, "
               f"estimated DOF from scale. Re-train recommended.")
@@ -1244,16 +1264,6 @@ def plot_summary(results: list[tuple[str, DetectionResult]],
                        textcoords='offset points', xytext=(4, 4))
 
         ax.axvline(0, color='gray', ls='-', alpha=0.3)
-
-        # Detection threshold lines
-        thresholds = baseline.detection_thresholds(name)
-        ft_db = thresholds['floor_threshold_db']
-        feat_t = thresholds['feature_threshold']
-        ax.axvline(-ft_db, color='red', ls='--', alpha=0.4, lw=1)
-        ax.axvline(ft_db, color='red', ls='--', alpha=0.4, lw=1, label=f'Floor \u00b1{ft_db:.1f} dB')
-        ax.axhline(feat_t, color='orange', ls='--', alpha=0.4, lw=1, label=f'Feature {feat_t:.1f}')
-        ax.legend(fontsize=6, loc='upper left')
-
         ax.set_xlabel('Floor shift (dB)')
         ax.set_ylabel('Feature max |z|')
         ax.set_title(f'{name} — Detection Space')

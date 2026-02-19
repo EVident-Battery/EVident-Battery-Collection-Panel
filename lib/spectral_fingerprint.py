@@ -500,9 +500,20 @@ class SpectralBaseline:
 
                 all_zsn = np.array(all_z_shape_norm)
                 # Per-bin std; floor at 1.0 (theoretical minimum)
-                self.shape_process_std[name] = np.maximum(
+                raw_std = np.maximum(
                     np.std(all_zsn, axis=0, ddof=1), 1.0
                 )
+                # With few recordings, the std estimate is unreliable.
+                # Inflate by the one-sided upper confidence factor:
+                #   factor = √((N-1) / χ²_α(N-1))
+                # This ensures we don't underestimate natural jitter
+                # and cause false alarms from estimation uncertainty.
+                from scipy.stats import chi2 as chi2_dist
+                alpha = 0.20  # 80% confidence upper bound
+                inflate = np.sqrt(
+                    (n_rec - 1) / chi2_dist.ppf(alpha / 2, n_rec - 1)
+                )
+                self.shape_process_std[name] = raw_std * inflate
             else:
                 self.shape_process_std[name] = np.ones(len(self.freqs))
 

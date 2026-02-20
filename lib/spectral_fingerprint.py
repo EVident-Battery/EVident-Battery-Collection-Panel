@@ -448,9 +448,27 @@ class SpectralBaseline:
                 )
 
                 # Floor-level process std (broadband mean jitter)
-                mean_log_ratios = np.mean(log_ratios, axis=1)  # per-recording means
-                floor_emp_var = np.var(mean_log_ratios, ddof=1)
-                floor_chi2_var = np.mean(chi2_vars) * self._bin_correlation_factor / len(self.freqs)
+                #
+                # Must be measured in z-score space to match the test
+                # statistic z_floor = mean(z), where z = (lr - bias) / sigma.
+                # The per-bin sigma varies (process_var is higher at high
+                # frequencies), so mean(z) ≠ mean(lr) / const.
+                mean_z_per_rec = []
+                for i in range(n_rec):
+                    lr = log_ratios[i]
+                    dof_i = self._per_recording_dof[name][i]
+                    bias_i = ((digamma(dof_i / 2.0) -
+                               np.log(dof_i / 2.0)) -
+                              (digamma(self.dof_baseline[name] / 2.0) -
+                               np.log(self.dof_baseline[name] / 2.0)))
+                    var_i = (polygamma(1, dof_i / 2.0) +
+                             polygamma(1, self.dof_baseline[name] / 2.0) +
+                             self.process_var[name])
+                    z_i = (lr - bias_i) / np.sqrt(var_i)
+                    mean_z_per_rec.append(float(np.mean(z_i)))
+
+                floor_emp_var = np.var(mean_z_per_rec, ddof=1)
+                floor_chi2_var = self._bin_correlation_factor / len(self.freqs)
                 self.floor_process_std[name] = float(np.sqrt(
                     max(0, floor_emp_var - floor_chi2_var)
                 ))

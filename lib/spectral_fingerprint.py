@@ -1443,7 +1443,8 @@ def train_from_folder(baseline_folder: str, analyzer: SpectralAnalyzer,
 
 
 def check_folder(monitor_folder: str, baseline: SpectralBaseline,
-                 output_dir: str = None, verbose: bool = True
+                 output_dir: str = None, verbose: bool = True,
+                 plot: str = 'all'
                  ) -> list[tuple[str, DetectionResult]]:
     """
     Check all CSVs in a folder against a learned baseline.
@@ -1453,7 +1454,8 @@ def check_folder(monitor_folder: str, baseline: SpectralBaseline,
 
     if output_dir is None:
         output_dir = str(Path(monitor_folder).parent / 'results')
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if plot != 'none':
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     results = []
     for filename, fs, signals in files:
@@ -1489,11 +1491,12 @@ def check_folder(monitor_folder: str, baseline: SpectralBaseline,
                     print(f"    → {feat['freq_hz']:8.1f} Hz  "
                           f"z={feat['z_feature']:+.1f}")
 
-        save = str(Path(output_dir) / f"{Path(filename).stem}_comparison.png")
-        plot_comparison(baseline, result, frame,
-                       title=f'{filename} vs Baseline', save_path=save)
-        if verbose:
-            print(f"  Plot: {save}")
+        if plot == 'all':
+            save = str(Path(output_dir) / f"{Path(filename).stem}_comparison.png")
+            plot_comparison(baseline, result, frame,
+                           title=f'{filename} vs Baseline', save_path=save)
+            if verbose:
+                print(f"  Plot: {save}")
 
         results.append((filename, result))
 
@@ -1502,7 +1505,7 @@ def check_folder(monitor_folder: str, baseline: SpectralBaseline,
         print(f"\n{'='*60}")
         print(f"Summary: {n_anom} / {len(results)} files flagged")
 
-    if len(results) >= 1:
+    if plot != 'none' and len(results) >= 1:
         summary_path = str(Path(output_dir) / '_summary.png')
         plot_summary(results, baseline, save_path=summary_path)
         if verbose:
@@ -2032,6 +2035,8 @@ Standalone:
     # check
     p = sub.add_parser('check', help='Check project/monitor/ against baseline')
     p.add_argument('project', help='Project directory')
+    p.add_argument('--plot', choices=['all', 'summary', 'none'], default='all',
+                   help='Plot mode: all=per-file+summary, summary=summary only, none=skip all plots')
 
     # show
     p = sub.add_parser('show', help='Visualize the learned baseline')
@@ -2116,7 +2121,7 @@ Standalone:
 
         baseline = SpectralBaseline.load(str(bl_path))
         out = str(proj / 'results')
-        check_folder(str(proj / 'monitor'), baseline, output_dir=out)
+        check_folder(str(proj / 'monitor'), baseline, output_dir=out, plot=args.plot)
 
     elif args.command == 'show':
         proj = Path(args.project)

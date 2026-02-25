@@ -1,3 +1,5 @@
 API_ENDPOINTS.md
 SensorQA-master
 .idea
+build/
+dist/

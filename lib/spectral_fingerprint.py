@@ -1151,12 +1151,12 @@ def plot_comparison(baseline: SpectralBaseline, result: DetectionResult,
             f"  Bins: {len(z)} total, {n_struct} structural, {n_floor} floor",
             "",
             f"  Tier 1 (Floor):   z={result.floor_z[name]:+.1f}  "
-            f"shift={shift:+.1f} dB  p={fp:.4f}  "
+            f"shift={shift:+.1f} dB  p={fp:.2e}  "
             f"{'⚠ TRIGGERED' if 'floor' in tiers else '✓'}",
             f"  Tier 2 (Shape):   T={result.shape_stat[name]:.2f}  "
-            f"ν_eff={result.shape_nu_eff[name]:.0f}  p={result.shape_p[name]:.4f}  "
+            f"ν_eff={result.shape_nu_eff[name]:.0f}  p={result.shape_p[name]:.2e}  "
             f"{'⚠ TRIGGERED' if 'shape' in tiers else '✓'}",
-            f"  Tier 3 (Feature): max|z|={fstat:.1f}  p={fep:.4f}  "
+            f"  Tier 3 (Feature): max|z|={fstat:.1f}  p={fep:.2e}  "
             f"{'⚠ TRIGGERED' if 'feature' in tiers else '✓'}",
         ]
         if top_features:
@@ -1479,13 +1479,13 @@ def check_folder(monitor_folder: str, baseline: SpectralBaseline,
                 ax_s = f"ANOMALY [{', '.join(tiers)}]" if tiers else "normal"
                 print(f"  {name}: {ax_s}")
                 print(f"    Floor:   shift={result.floor_shift_db[name]:+.1f} dB  "
-                      f"p={result.floor_p[name]:.4f}  "
+                      f"p={result.floor_p[name]:.2e}  "
                       f"{'⚠' if 'floor' in tiers else '✓'}")
                 print(f"    Shape:   T={result.shape_stat[name]:.2f}  "
-                      f"p={result.shape_p[name]:.4f}  "
+                      f"p={result.shape_p[name]:.2e}  "
                       f"{'⚠' if 'shape' in tiers else '✓'}")
                 print(f"    Feature: max|z|={result.feature_stat[name]:.1f}  "
-                      f"p={result.feature_p[name]:.4f}  "
+                      f"p={result.feature_p[name]:.2e}  "
                       f"{'⚠' if 'feature' in tiers else '✓'}")
                 for feat in result.feature_freqs.get(name, [])[:3]:
                     print(f"    → {feat['freq_hz']:8.1f} Hz  "

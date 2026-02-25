@@ -50,10 +50,11 @@ class LicenseCheckWorker(QThread):
     """Background worker to validate a license key against AWS."""
     check_result = pyqtSignal(bool, str)  # (is_valid, message)
 
-    def __init__(self, license_key: str, endpoint: str) -> None:
+    def __init__(self, license_key: str, endpoint: str, sensor_id: str) -> None:
         super().__init__()
         self._key = license_key
         self._endpoint = endpoint
+        self._sensor_id = sensor_id
 
     def run(self) -> None:
         try:
@@ -62,7 +63,7 @@ class LicenseCheckWorker(QThread):
                 "evb-user-type": "customer",
             }
             payload = {
-                "sensor_id": "license-check",
+                "sensor_id": self._sensor_id,
                 "filenames": ["baseline.json"],
             }
             resp = requests.post(
@@ -755,13 +756,23 @@ class MonitoringTabWidget(QWidget):
             )
             return
 
+        if not self._selected_hostname:
+            self._license_status_label.setText("!")
+            self._license_status_label.setStyleSheet(
+                "color: #DC2626; font-weight: bold; font-size: 16px; background: transparent;"
+            )
+            QMessageBox.warning(
+                self, "No Sensor", "Please select a sensor before checking the key.",
+            )
+            return
+
         self._license_check_btn.setEnabled(False)
         self._license_status_label.setText("...")
         self._license_status_label.setStyleSheet(
             "color: #94A3B8; background: transparent;"
         )
 
-        self._license_worker = LicenseCheckWorker(key, AWS_ENDPOINT)
+        self._license_worker = LicenseCheckWorker(key, AWS_ENDPOINT, self._selected_hostname)
         self._license_worker.check_result.connect(self._on_license_result)
         self._license_worker.finished.connect(
             lambda: self._license_check_btn.setEnabled(True)

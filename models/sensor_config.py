@@ -142,7 +142,7 @@ class SensorConfig:
     sample_rate: SampleRate = SampleRate.HZ_104
     accel_range: AccelRange = AccelRange.G_4
     output_folder: Optional[Path] = None
-    upload_to_aws: bool = True
+    upload_to_aws: bool = False
 
     # Stop mode settings
     stop_mode: StopMode = StopMode.CONTINUOUS

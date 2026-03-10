@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
-    QRadioButton, QTimeEdit, QMessageBox, QTabWidget
+    QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
@@ -842,8 +842,9 @@ class MainWindow(QMainWindow):
 
         # AWS upload
         self._aws_checkbox = QCheckBox("Upload to AWS after each collection")
-        self._aws_checkbox.setChecked(True)
+        self._aws_checkbox.setChecked(False)
         self._aws_checkbox.stateChanged.connect(self._on_settings_changed)
+        self._aws_checkbox.clicked.connect(self._on_aws_checkbox_clicked)
         settings_grid.addWidget(self._aws_checkbox, row, 0, 1, 2)
 
         layout.addLayout(settings_grid)
@@ -1218,7 +1219,17 @@ class MainWindow(QMainWindow):
         self._update_stop_mode_controls_state()
         self._on_settings_changed()
 
-    @pyqtSlot()
+    def _on_aws_checkbox_clicked(self, checked: bool) -> None:
+        """Show a storage warning when the user checks the AWS upload box."""
+        if checked:
+            QMessageBox.information(
+                self,
+                "AWS Upload",
+                "Please verify that your account has sufficient storage "
+                "capacity to accommodate the data from this job before "
+                "proceeding.",
+            )
+
     def _on_settings_changed(self) -> None:
         """Handle settings change - save to selected config."""
         if not self._selected_hostname:

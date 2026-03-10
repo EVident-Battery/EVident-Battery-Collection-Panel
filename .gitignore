@@ -3,3 +3,4 @@ SensorQA-master
 .idea
 build/
 dist/
+aws_code.py

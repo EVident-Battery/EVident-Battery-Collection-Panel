@@ -44,6 +44,9 @@ class PlotWidget(QWidget):
         layout.addWidget(self._toolbar)
         layout.addWidget(self._canvas, 1)
 
+        # Double-click to reset view
+        self._canvas.mpl_connect("button_press_event", self._on_mouse_press)
+
     # ------------------------------------------------------------------
     def plot(self, result: AnalysisResult,
              x_unit: str, y_unit: str,
@@ -53,7 +56,7 @@ class PlotWidget(QWidget):
         self._figure.clear()
 
         if result.is_2d:
-            self._plot_spectrogram(result, x_unit, y_unit, log_z)
+            self._plot_spectrogram(result, x_unit, y_unit, log_y, log_z)
         else:
             self._plot_lines(result, x_unit, y_unit, log_x, log_y)
 
@@ -102,7 +105,7 @@ class PlotWidget(QWidget):
     # ------------------------------------------------------------------
     def _plot_spectrogram(self, result: AnalysisResult,
                           x_unit: str, y_unit: str,
-                          log_z: bool) -> None:
+                          log_y: bool, log_z: bool) -> None:
         ax = self._figure.add_subplot(111)
         self._style_axes(ax)
 
@@ -140,8 +143,16 @@ class PlotWidget(QWidget):
                        color=self.TEXT_COLOR, fontsize=10)
         ax.set_ylabel(f"{result.y_axis.label} ({y_unit})",
                        color=self.TEXT_COLOR, fontsize=10)
+        if log_y:
+            ax.set_yscale("log")
         ax.set_title(f"Spectrogram \u2014 {channel}",
                       color=self.TEXT_COLOR, fontsize=11)
+
+    # ------------------------------------------------------------------
+    def _on_mouse_press(self, event) -> None:
+        """Double-click resets the view to home."""
+        if event.dblclick:
+            self._toolbar.home()
 
     # ------------------------------------------------------------------
     def _style_axes(self, ax) -> None:

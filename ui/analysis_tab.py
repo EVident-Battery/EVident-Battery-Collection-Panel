@@ -371,7 +371,7 @@ class AnalysisTabWidget(QWidget):
         # Show/hide scale checkboxes based on 1D vs 2D
         if result.is_2d:
             self._log_x_cb.hide()
-            self._log_y_cb.hide()
+            self._log_y_cb.show()   # log frequency axis
             self._log_z_cb.show()
         else:
             self._log_x_cb.show()

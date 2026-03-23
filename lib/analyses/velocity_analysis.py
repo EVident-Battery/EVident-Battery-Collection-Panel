@@ -9,6 +9,7 @@ from lib.analysis_registry import (
     AnalysisRegistry, AnalysisParameter, AxisConfig, AnalysisResult,
     BaseAnalysis,
 )
+from lib.analyses._transforms import apply_transform
 
 
 # ------------------------------------------------------------------
@@ -106,6 +107,8 @@ class VelocityTimeDomainAnalysis(BaseAnalysis):
             x_data[ch] = np.arange(n) / fs
             y_data[ch] = np.fft.irfft(V, n=n)
 
+        y_data = apply_transform(y_data, params.get("transform", "None"),
+                                 int(params.get("smooth_window", 51)))
         return AnalysisResult(
             x_data=x_data,
             y_data=y_data,
@@ -161,6 +164,8 @@ class VelocitySpectrumAnalysis(BaseAnalysis):
             x_data[ch] = freqs
             y_data[ch] = magnitude
 
+        y_data = apply_transform(y_data, params.get("transform", "None"),
+                                 int(params.get("smooth_window", 51)))
         return AnalysisResult(
             x_data=x_data,
             y_data=y_data,

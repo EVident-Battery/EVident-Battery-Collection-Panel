@@ -67,6 +67,7 @@ class AnalysisTabWidget(QWidget):
         controls.addWidget(self._create_analysis_group())
         controls.addWidget(self._create_channels_group())
         controls.addWidget(self._create_units_group())
+        controls.addWidget(self._create_signal_processing_group())
         self._params_group = self._create_params_group()
         controls.addWidget(self._params_group)
 
@@ -172,6 +173,76 @@ class AnalysisTabWidget(QWidget):
         return grp
 
     # ------------------------------------------------------------------
+    def _create_signal_processing_group(self) -> QGroupBox:
+        grp = QGroupBox("Signal Processing")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
+        lay = QGridLayout(grp)
+        lay.setContentsMargins(8, 12, 8, 4)
+
+        # --- Filter ---
+        lay.addWidget(QLabel("Filter:"), 0, 0)
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItems([
+            "None", "High Pass", "Low Pass", "Band Pass", "Band Stop",
+        ])
+        self._filter_combo.setMinimumWidth(100)
+        lay.addWidget(self._filter_combo, 0, 1)
+
+        self._filter_freq_label = QLabel("Freq (Hz):")
+        lay.addWidget(self._filter_freq_label, 1, 0)
+        self._filter_freq_spin = QDoubleSpinBox()
+        self._filter_freq_spin.setRange(0.1, 50000.0)
+        self._filter_freq_spin.setSingleStep(1.0)
+        self._filter_freq_spin.setDecimals(1)
+        self._filter_freq_spin.setValue(10.0)
+        lay.addWidget(self._filter_freq_spin, 1, 1)
+
+        self._filter_freq2_label = QLabel("Freq 2 (Hz):")
+        lay.addWidget(self._filter_freq2_label, 2, 0)
+        self._filter_freq2_spin = QDoubleSpinBox()
+        self._filter_freq2_spin.setRange(0.1, 50000.0)
+        self._filter_freq2_spin.setSingleStep(1.0)
+        self._filter_freq2_spin.setDecimals(1)
+        self._filter_freq2_spin.setValue(1000.0)
+        lay.addWidget(self._filter_freq2_spin, 2, 1)
+
+        self._filter_order_label = QLabel("Order:")
+        lay.addWidget(self._filter_order_label, 3, 0)
+        self._filter_order_spin = QSpinBox()
+        self._filter_order_spin.setRange(1, 10)
+        self._filter_order_spin.setValue(4)
+        lay.addWidget(self._filter_order_spin, 3, 1)
+
+        # --- Transform ---
+        lay.addWidget(QLabel("Transform:"), 4, 0)
+        self._transform_combo = QComboBox()
+        self._transform_combo.addItems(["None", "Hilbert Envelope"])
+        self._transform_combo.setMinimumWidth(100)
+        lay.addWidget(self._transform_combo, 4, 1)
+
+        self._smooth_label = QLabel("Smooth (pts):")
+        lay.addWidget(self._smooth_label, 5, 0)
+        self._smooth_spin = QSpinBox()
+        self._smooth_spin.setRange(1, 5001)
+        self._smooth_spin.setSingleStep(10)
+        self._smooth_spin.setValue(51)
+        self._smooth_spin.setToolTip(
+            "Moving-average window for smoothing the envelope (1 = none)")
+        lay.addWidget(self._smooth_spin, 5, 1)
+
+        # Initial visibility — hide sub-parameters
+        self._filter_freq_label.hide()
+        self._filter_freq_spin.hide()
+        self._filter_freq2_label.hide()
+        self._filter_freq2_spin.hide()
+        self._filter_order_label.hide()
+        self._filter_order_spin.hide()
+        self._smooth_label.hide()
+        self._smooth_spin.hide()
+
+        return grp
+
+    # ------------------------------------------------------------------
     def _create_params_group(self) -> QGroupBox:
         grp = QGroupBox("Parameters")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
@@ -193,6 +264,16 @@ class AnalysisTabWidget(QWidget):
         self._log_x_cb.stateChanged.connect(self._on_display_changed)
         self._log_y_cb.stateChanged.connect(self._on_display_changed)
         self._log_z_cb.stateChanged.connect(self._on_display_changed)
+
+        # Signal processing group
+        self._filter_combo.currentTextChanged.connect(self._on_filter_changed)
+        self._filter_combo.currentTextChanged.connect(self._schedule_analysis)
+        self._filter_freq_spin.valueChanged.connect(self._schedule_analysis)
+        self._filter_freq2_spin.valueChanged.connect(self._schedule_analysis)
+        self._filter_order_spin.valueChanged.connect(self._schedule_analysis)
+        self._transform_combo.currentTextChanged.connect(self._on_transform_changed)
+        self._transform_combo.currentTextChanged.connect(self._schedule_analysis)
+        self._smooth_spin.valueChanged.connect(self._schedule_analysis)
 
         # Worker signals
         self._worker.load_complete.connect(self._on_load_complete)
@@ -227,13 +308,22 @@ class AnalysisTabWidget(QWidget):
         return AnalysisRegistry.get(cat, name)
 
     def _collect_params(self) -> Dict:
-        """Read current values from the dynamic parameter widgets."""
+        """Read current values from dynamic parameter widgets + signal processing."""
         params: Dict = {}
-        for key, (pdef, widget) in self._param_widgets.items():
+        # Analysis-specific params
+        for key, entry in self._param_widgets.items():
+            pdef, widget = entry[0], entry[1]
             if pdef.param_type in ("int", "float"):
                 params[key] = widget.value()
             elif pdef.param_type == "choice":
                 params[key] = widget.currentText()
+        # Signal processing params
+        params["filter_type"] = self._filter_combo.currentText()
+        params["filter_freq"] = self._filter_freq_spin.value()
+        params["filter_freq2"] = self._filter_freq2_spin.value()
+        params["filter_order"] = self._filter_order_spin.value()
+        params["transform"] = self._transform_combo.currentText()
+        params["smooth_window"] = self._smooth_spin.value()
         return params
 
     # ------------------------------------------------------------------
@@ -291,6 +381,25 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+    @pyqtSlot(str)
+    def _on_filter_changed(self, text: str) -> None:
+        """Show/hide filter sub-parameters based on filter type."""
+        has_filter = text != "None"
+        is_band = text in ("Band Pass", "Band Stop")
+        self._filter_freq_label.setVisible(has_filter)
+        self._filter_freq_spin.setVisible(has_filter)
+        self._filter_freq2_label.setVisible(is_band)
+        self._filter_freq2_spin.setVisible(is_band)
+        self._filter_order_label.setVisible(has_filter)
+        self._filter_order_spin.setVisible(has_filter)
+
+    @pyqtSlot(str)
+    def _on_transform_changed(self, text: str) -> None:
+        """Show/hide smooth parameter based on transform selection."""
+        visible = text == "Hilbert Envelope"
+        self._smooth_label.setVisible(visible)
+        self._smooth_spin.setVisible(visible)
+
     @pyqtSlot()
     def _on_browse(self) -> None:
         start_dir = str(Path.home())
@@ -322,6 +431,11 @@ class AnalysisTabWidget(QWidget):
             f"Loaded: {len(columns)} channels, fs={fs:.1f} Hz, {n} samples",
             LogLevel.SUCCESS,
         )
+
+        # Update filter frequency limits to Nyquist
+        nyquist = fs / 2.0 * 0.95
+        self._filter_freq_spin.setMaximum(nyquist)
+        self._filter_freq2_spin.setMaximum(nyquist)
 
         # Populate channel list — all checked by default
         self._channel_list.blockSignals(True)

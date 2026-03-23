@@ -10,6 +10,7 @@ from lib.analysis_registry import (
     AnalysisRegistry, AnalysisParameter, AxisConfig, AnalysisResult,
     BaseAnalysis, infer_quantity,
 )
+from lib.analyses._transforms import apply_transform
 
 
 @AnalysisRegistry.register
@@ -50,6 +51,8 @@ class PSDAnalysis(BaseAnalysis):
             x_data[ch] = freqs
             y_data[ch] = psd  # (m/s²)²/Hz
 
+        y_data = apply_transform(y_data, params.get("transform", "None"),
+                                 int(params.get("smooth_window", 51)))
         y_quantity, _ = infer_quantity(channels)
         psd_quantity = f"psd_{y_quantity}"  # e.g. "psd_acceleration"
 

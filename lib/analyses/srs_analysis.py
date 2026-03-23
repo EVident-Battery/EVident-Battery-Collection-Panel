@@ -10,6 +10,7 @@ from lib.analysis_registry import (
     AnalysisRegistry, AnalysisParameter, AxisConfig, AnalysisResult,
     BaseAnalysis, infer_quantity,
 )
+from lib.analyses._transforms import apply_transform
 
 
 @AnalysisRegistry.register
@@ -52,6 +53,8 @@ class SRSAnalysis(BaseAnalysis):
             x_data[ch] = fn_array
             y_data[ch] = srs
 
+        y_data = apply_transform(y_data, params.get("transform", "None"),
+                                 int(params.get("smooth_window", 51)))
         y_quantity, y_unit = infer_quantity(channels)
 
         return AnalysisResult(

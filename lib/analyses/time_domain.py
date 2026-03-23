@@ -8,6 +8,7 @@ import numpy as np
 from lib.analysis_registry import (
     AnalysisRegistry, AxisConfig, AnalysisResult, BaseAnalysis, infer_quantity,
 )
+from lib.analyses._transforms import apply_transform
 
 
 @AnalysisRegistry.register
@@ -23,6 +24,8 @@ class TimeDomainAnalysis(BaseAnalysis):
 
         x_data = {ch: t for ch in channels}
         y_data = {ch: signals[ch] for ch in channels}
+        y_data = apply_transform(y_data, params.get("transform", "None"),
+                                 int(params.get("smooth_window", 51)))
         y_quantity, y_unit = infer_quantity(channels)
 
         return AnalysisResult(

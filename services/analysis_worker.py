@@ -66,5 +66,13 @@ class AnalysisWorker(QThread):
     def _do_analyze(self, analysis: BaseAnalysis, fs: float,
                     signals: Dict[str, np.ndarray],
                     channels: List[str], params: Dict) -> None:
-        result = analysis.compute(fs, signals, channels, **params)
+        from lib.analyses._transforms import apply_filter
+        filtered = apply_filter(
+            signals, fs,
+            params.get("filter_type", "None"),
+            params.get("filter_freq", 10.0),
+            params.get("filter_freq2", 1000.0),
+            params.get("filter_order", 4),
+        )
+        result = analysis.compute(fs, filtered, channels, **params)
         self.analysis_complete.emit(result)

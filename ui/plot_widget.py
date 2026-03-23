@@ -51,14 +51,16 @@ class PlotWidget(QWidget):
     def plot(self, result: AnalysisResult,
              x_unit: str, y_unit: str,
              log_x: bool, log_y: bool,
-             log_z: bool = False) -> None:
+             log_z: bool = False,
+             all_channels: list | None = None) -> None:
         """Clear and re-draw from an *AnalysisResult*."""
         self._figure.clear()
 
         if result.is_2d:
             self._plot_spectrogram(result, x_unit, y_unit, log_y, log_z)
         else:
-            self._plot_lines(result, x_unit, y_unit, log_x, log_y)
+            self._plot_lines(result, x_unit, y_unit, log_x, log_y,
+                             all_channels)
 
         self._canvas.draw_idle()
 
@@ -69,7 +71,8 @@ class PlotWidget(QWidget):
     # ------------------------------------------------------------------
     def _plot_lines(self, result: AnalysisResult,
                     x_unit: str, y_unit: str,
-                    log_x: bool, log_y: bool) -> None:
+                    log_x: bool, log_y: bool,
+                    all_channels: list | None = None) -> None:
         ax = self._figure.add_subplot(111)
         self._style_axes(ax)
 
@@ -84,7 +87,12 @@ class PlotWidget(QWidget):
                 result.y_axis.default_unit, y_unit,
                 result.y_axis.quantity,
             )
-            color = self.ACCENT_COLORS[i % len(self.ACCENT_COLORS)]
+            # Use stable color based on position in the full channel list
+            if all_channels and channel in all_channels:
+                ci = all_channels.index(channel)
+            else:
+                ci = i
+            color = self.ACCENT_COLORS[ci % len(self.ACCENT_COLORS)]
             ax.plot(x, y, color=color, linewidth=0.8, alpha=0.85,
                     label=channel)
 

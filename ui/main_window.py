@@ -97,7 +97,7 @@ QPushButton#stopAllButton:hover {
     background-color: #EF4444;
 }
 
-QSpinBox, QComboBox, QLineEdit {
+QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit {
     background-color: #1E293B;
     color: #E2E8F0;
     border: 1px solid #334155;
@@ -106,7 +106,7 @@ QSpinBox, QComboBox, QLineEdit {
     min-height: 20px;
 }
 
-QSpinBox:focus, QComboBox:focus, QLineEdit:focus {
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus {
     border-color: #3B82F6;
 }
 

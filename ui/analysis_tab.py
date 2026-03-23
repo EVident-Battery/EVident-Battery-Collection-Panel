@@ -22,6 +22,12 @@ from ui.log_widget import LogWidget, LogLevel
 from ui.plot_widget import PlotWidget
 
 
+_INNER_GROUP_STYLE = """
+    QGroupBox { border: none; background: transparent; margin-top: 0px; }
+    QGroupBox::title { color: #94A3B8; }
+"""
+
+
 class AnalysisTabWidget(QWidget):
     """Self-contained Data Analysis tab."""
 
@@ -85,6 +91,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _create_file_group(self) -> QGroupBox:
         grp = QGroupBox("File")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
         lay.setContentsMargins(8, 4, 8, 4)
 
@@ -103,6 +110,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _create_analysis_group(self) -> QGroupBox:
         grp = QGroupBox("Analysis")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
         lay.setContentsMargins(8, 4, 8, 4)
 
@@ -122,6 +130,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _create_channels_group(self) -> QGroupBox:
         grp = QGroupBox("Channels")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(8, 4, 8, 4)
 
@@ -135,6 +144,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _create_units_group(self) -> QGroupBox:
         grp = QGroupBox("Units && Scale")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
         lay.setContentsMargins(8, 4, 8, 4)
 
@@ -164,6 +174,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _create_params_group(self) -> QGroupBox:
         grp = QGroupBox("Parameters")
+        grp.setStyleSheet(_INNER_GROUP_STYLE)
         self._params_layout = QGridLayout(grp)
         self._params_layout.setContentsMargins(8, 4, 8, 4)
         grp.hide()
@@ -422,7 +433,8 @@ class AnalysisTabWidget(QWidget):
         log_x = self._log_x_cb.isChecked()
         log_y = self._log_y_cb.isChecked()
         log_z = self._log_z_cb.isChecked()
-        self._plot_widget.plot(result, x_unit, y_unit, log_x, log_y, log_z)
+        self._plot_widget.plot(result, x_unit, y_unit, log_x, log_y, log_z,
+                               all_channels=self._column_names)
 
     # ------------------------------------------------------------------
     def cleanup(self) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, Optional, Type
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 
@@ -26,10 +26,12 @@ class UnitConverter:
     """Centralised unit conversion engine.
 
     Every physical quantity has a *base unit*.  Conversions always go
-    ``source -> base -> target``.
+    ``source -> base -> target``.  Nonlinear units (dB) are stored in a
+    separate ``_nonlinear`` dict with callable converters.
     """
 
     _units: ClassVar[Dict[str, Dict[str, UnitDefinition]]] = {}
+    _nonlinear: ClassVar[Dict[Tuple[str, str], Tuple[Callable, Callable]]] = {}
     _bootstrapped: ClassVar[bool] = False
 
     # ------------------------------------------------------------------
@@ -40,12 +42,31 @@ class UnitConverter:
         cls._bootstrapped = True
         G = 9.80665
         DEG2RAD = np.pi / 180.0
+        DB_REF_MS2 = 16.0 * G  # 156.9064 m/s² — 0 dB reference
 
-        # Acceleration  (base: m/s^2)
+        # Acceleration  (base: m/s²)
         cls._reg("acceleration", "m/s\u00b2", 1.0)
         cls._reg("acceleration", "g",        G, 1.0 / G)
         cls._reg("acceleration", "mm/s\u00b2", 1e-3, 1e3)
         cls._reg("acceleration", "in/s\u00b2", 0.0254, 1.0 / 0.0254)
+        # dB re 16 g (nonlinear)
+        cls._reg_nonlinear(
+            "acceleration", "dB",
+            to_base_fn=lambda dB: DB_REF_MS2 * np.power(10.0, dB / 20.0),
+            from_base_fn=lambda ms2: 20.0 * np.log10(
+                np.maximum(np.abs(ms2), 1e-12) / DB_REF_MS2),
+        )
+
+        # PSD acceleration  (base: (m/s²)²/Hz)
+        PSD_REF = DB_REF_MS2 ** 2
+        cls._reg("psd_acceleration", "(m/s\u00b2)\u00b2/Hz", 1.0)
+        cls._reg("psd_acceleration", "g\u00b2/Hz", G ** 2, 1.0 / G ** 2)
+        cls._reg_nonlinear(
+            "psd_acceleration", "dB",
+            to_base_fn=lambda dB: PSD_REF * np.power(10.0, dB / 10.0),
+            from_base_fn=lambda psd: 10.0 * np.log10(
+                np.maximum(np.abs(psd), 1e-30) / PSD_REF),
+        )
 
         # Angular velocity  (base: rad/s)
         cls._reg("angular_velocity", "rad/s", 1.0)
@@ -88,6 +109,18 @@ class UnitConverter:
         )
         cls._units.setdefault(quantity, {})[symbol] = unit
 
+    @classmethod
+    def _reg_nonlinear(cls, quantity: str, symbol: str,
+                       to_base_fn: Callable, from_base_fn: Callable) -> None:
+        """Register a nonlinear unit (e.g. dB).  A dummy linear entry is also
+        created so the symbol appears in ``get_units_for_quantity()``."""
+        dummy = UnitDefinition(
+            name=symbol, symbol=symbol,
+            base_quantity=quantity, to_base=1.0, from_base=1.0,
+        )
+        cls._units.setdefault(quantity, {})[symbol] = dummy
+        cls._nonlinear[(quantity, symbol)] = (to_base_fn, from_base_fn)
+
     # ------------------------------------------------------------------
     @classmethod
     def convert(cls, values: np.ndarray,
@@ -98,11 +131,22 @@ class UnitConverter:
         if from_unit == to_unit:
             return values
         q = cls._units.get(quantity, {})
-        src = q.get(from_unit)
-        dst = q.get(to_unit)
-        if src is None or dst is None:
+        if from_unit not in q or to_unit not in q:
             return values  # unknown unit — return unchanged
-        return values * src.to_base * dst.from_base
+
+        # source -> base
+        nl_src = cls._nonlinear.get((quantity, from_unit))
+        if nl_src is not None:
+            base_values = nl_src[0](values)
+        else:
+            base_values = values * q[from_unit].to_base
+
+        # base -> target
+        nl_dst = cls._nonlinear.get((quantity, to_unit))
+        if nl_dst is not None:
+            return nl_dst[1](base_values)
+        else:
+            return base_values * q[to_unit].from_base
 
     @classmethod
     def get_units_for_quantity(cls, quantity: str) -> List[str]:
@@ -127,11 +171,35 @@ class AxisConfig:
 @dataclass
 class AnalysisResult:
     """Standard result container returned by every analysis ``compute()``."""
-    x_data: Dict[str, np.ndarray]   # channel -> x values
-    y_data: Dict[str, np.ndarray]   # channel -> y values
+    x_data: Dict[str, np.ndarray]   # channel -> x values (1D)
+    y_data: Dict[str, np.ndarray]   # channel -> y values (1D)
     x_axis: AxisConfig
     y_axis: AxisConfig
     metadata: Dict = field(default_factory=dict)
+
+    # --- Optional 2D fields (spectrogram) ---
+    is_2d: bool = False
+    z_data: Optional[Dict[str, np.ndarray]] = None   # channel -> 2D matrix
+    z_axis: Optional[AxisConfig] = None               # colorbar axis config
+    y_data_2d: Optional[Dict[str, np.ndarray]] = None # channel -> freq array
+
+
+# ---------------------------------------------------------------------------
+# Analysis parameters
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisParameter:
+    """Descriptor for a user-configurable analysis parameter."""
+    key: str                                # kwarg name passed to compute()
+    label: str                              # UI display label
+    param_type: str                         # "int", "float", "choice"
+    default: Any                            # default value
+    min_val: Optional[float] = None
+    max_val: Optional[float] = None
+    step: Optional[float] = None
+    choices: Optional[List[str]] = None     # for param_type="choice"
+    tooltip: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +213,13 @@ class BaseAnalysis(ABC):
     category: str = ""
     description: str = ""
 
+    def get_parameters(self) -> List[AnalysisParameter]:
+        """Override to expose configurable parameters."""
+        return []
+
     @abstractmethod
     def compute(self, fs: float, signals: Dict[str, np.ndarray],
-                channels: List[str]) -> AnalysisResult:
+                channels: List[str], **params) -> AnalysisResult:
         """Run the analysis on selected *channels*."""
         ...
 
@@ -177,3 +249,18 @@ class AnalysisRegistry:
     def get_categories(cls) -> Dict[str, List[str]]:
         """Return ``{category: [analysis_names]}``."""
         return dict(cls._categories)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def infer_quantity(channels: List[str]) -> Tuple[str, str]:
+    """Guess physical quantity and default unit from column name prefixes."""
+    has_accel = any(c.lower().startswith("accel") for c in channels)
+    has_gyro = any(c.lower().startswith("gyro") for c in channels)
+    if has_accel and not has_gyro:
+        return "acceleration", "m/s\u00b2"
+    if has_gyro and not has_accel:
+        return "angular_velocity", "dps"
+    return "acceleration", "m/s\u00b2"

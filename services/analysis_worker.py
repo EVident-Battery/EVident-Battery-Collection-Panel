@@ -31,9 +31,10 @@ class AnalysisWorker(QThread):
 
     def request_analysis(self, analysis: BaseAnalysis, fs: float,
                          signals: Dict[str, np.ndarray],
-                         channels: List[str]) -> None:
+                         channels: List[str],
+                         params: Optional[Dict] = None) -> None:
         """Queue an analysis compute task and start the thread."""
-        self._task = ("analyze", analysis, fs, signals, channels)
+        self._task = ("analyze", analysis, fs, signals, channels, params or {})
         if not self.isRunning():
             self.start()
 
@@ -47,7 +48,7 @@ class AnalysisWorker(QThread):
             if task[0] == "load":
                 self._do_load(task[1])
             elif task[0] == "analyze":
-                self._do_analyze(task[1], task[2], task[3], task[4])
+                self._do_analyze(task[1], task[2], task[3], task[4], task[5])
         except Exception:
             tb = traceback.format_exc()
             if task[0] == "load":
@@ -64,6 +65,6 @@ class AnalysisWorker(QThread):
 
     def _do_analyze(self, analysis: BaseAnalysis, fs: float,
                     signals: Dict[str, np.ndarray],
-                    channels: List[str]) -> None:
-        result = analysis.compute(fs, signals, channels)
+                    channels: List[str], params: Dict) -> None:
+        result = analysis.compute(fs, signals, channels, **params)
         self.analysis_complete.emit(result)

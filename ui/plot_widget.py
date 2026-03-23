@@ -5,6 +5,7 @@ import matplotlib
 matplotlib.use("Qt5Agg")  # must be set before importing FigureCanvas
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
 
@@ -46,9 +47,26 @@ class PlotWidget(QWidget):
     # ------------------------------------------------------------------
     def plot(self, result: AnalysisResult,
              x_unit: str, y_unit: str,
-             log_x: bool, log_y: bool) -> None:
+             log_x: bool, log_y: bool,
+             log_z: bool = False) -> None:
         """Clear and re-draw from an *AnalysisResult*."""
         self._figure.clear()
+
+        if result.is_2d:
+            self._plot_spectrogram(result, x_unit, y_unit, log_z)
+        else:
+            self._plot_lines(result, x_unit, y_unit, log_x, log_y)
+
+        self._canvas.draw_idle()
+
+    def clear(self) -> None:
+        self._figure.clear()
+        self._canvas.draw_idle()
+
+    # ------------------------------------------------------------------
+    def _plot_lines(self, result: AnalysisResult,
+                    x_unit: str, y_unit: str,
+                    log_x: bool, log_y: bool) -> None:
         ax = self._figure.add_subplot(111)
         self._style_axes(ax)
 
@@ -80,11 +98,50 @@ class PlotWidget(QWidget):
             ax.legend(facecolor=self.AXES_BG, edgecolor=self.GRID_COLOR,
                       labelcolor=self.TEXT_COLOR, fontsize=8)
         ax.grid(True, alpha=0.3, color=self.GRID_COLOR)
-        self._canvas.draw_idle()
 
-    def clear(self) -> None:
-        self._figure.clear()
-        self._canvas.draw_idle()
+    # ------------------------------------------------------------------
+    def _plot_spectrogram(self, result: AnalysisResult,
+                          x_unit: str, y_unit: str,
+                          log_z: bool) -> None:
+        ax = self._figure.add_subplot(111)
+        self._style_axes(ax)
+
+        channel = list(result.z_data.keys())[0]
+        times = UnitConverter.convert(
+            result.x_data[channel],
+            result.x_axis.default_unit, x_unit,
+            result.x_axis.quantity,
+        )
+        freqs = UnitConverter.convert(
+            result.y_data_2d[channel],
+            result.y_axis.default_unit, y_unit,
+            result.y_axis.quantity,
+        )
+        Sxx = result.z_data[channel]
+
+        # Determine colour-scale normalisation
+        vmin = max(Sxx[Sxx > 0].min(), 1e-30) if log_z else None
+        norm = LogNorm(vmin=vmin, vmax=Sxx.max()) if log_z else None
+
+        im = ax.pcolormesh(times, freqs, Sxx, shading="gouraud",
+                           cmap="inferno", norm=norm)
+
+        # Dark-themed colorbar
+        z_label = ""
+        if result.z_axis:
+            z_label = f"{result.z_axis.label} ({result.z_axis.default_unit})"
+        cbar = self._figure.colorbar(im, ax=ax)
+        cbar.set_label(z_label, color=self.TEXT_COLOR, fontsize=9)
+        cbar.ax.yaxis.set_tick_params(color=self.TEXT_COLOR)
+        for lbl in cbar.ax.yaxis.get_ticklabels():
+            lbl.set_color(self.TEXT_COLOR)
+
+        ax.set_xlabel(f"{result.x_axis.label} ({x_unit})",
+                       color=self.TEXT_COLOR, fontsize=10)
+        ax.set_ylabel(f"{result.y_axis.label} ({y_unit})",
+                       color=self.TEXT_COLOR, fontsize=10)
+        ax.set_title(f"Spectrogram \u2014 {channel}",
+                      color=self.TEXT_COLOR, fontsize=11)
 
     # ------------------------------------------------------------------
     def _style_axes(self, ax) -> None:

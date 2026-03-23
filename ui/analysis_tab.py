@@ -23,8 +23,8 @@ from ui.plot_widget import PlotWidget
 
 
 _INNER_GROUP_STYLE = """
-    QGroupBox { border: none; background: transparent; margin-top: 0px; }
-    QGroupBox::title { color: #94A3B8; }
+    QGroupBox { border: none; background: transparent; margin-top: 12px; padding-top: 8px; }
+    QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 8px; color: #94A3B8; }
 """
 
 

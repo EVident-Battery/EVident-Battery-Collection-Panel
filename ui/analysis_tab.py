@@ -93,7 +93,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("File")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 12, 8, 4)
 
         self._file_edit = QLineEdit()
         self._file_edit.setReadOnly(True)
@@ -102,7 +102,7 @@ class AnalysisTabWidget(QWidget):
         lay.addWidget(self._file_edit, 0, 0)
 
         self._browse_btn = QPushButton("Browse\u2026")
-        self._browse_btn.setFixedWidth(80)
+        self._browse_btn.setMinimumWidth(90)
         lay.addWidget(self._browse_btn, 0, 1)
 
         return grp
@@ -112,7 +112,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Analysis")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 12, 8, 4)
 
         lay.addWidget(QLabel("Category:"), 0, 0)
         self._category_combo = QComboBox()
@@ -132,7 +132,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Channels")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QVBoxLayout(grp)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 12, 8, 4)
 
         self._channel_list = QListWidget()
         self._channel_list.setMaximumHeight(80)
@@ -146,7 +146,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Units && Scale")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 4, 8, 4)
+        lay.setContentsMargins(8, 12, 8, 4)
 
         lay.addWidget(QLabel("X Unit:"), 0, 0)
         self._x_unit_combo = QComboBox()
@@ -176,7 +176,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Parameters")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         self._params_layout = QGridLayout(grp)
-        self._params_layout.setContentsMargins(8, 4, 8, 4)
+        self._params_layout.setContentsMargins(8, 12, 8, 4)
         grp.hide()
         return grp
 

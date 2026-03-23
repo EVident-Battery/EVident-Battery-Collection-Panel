@@ -23,6 +23,7 @@ from services.manual_resolver import ManualResolverWorker
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
+from ui.analysis_tab import AnalysisTabWidget
 
 
 # Stylesheet for the entire application
@@ -326,6 +327,10 @@ class MainWindow(QMainWindow):
         # ---- Tab 2: Machine Monitoring ----
         self._monitoring_tab = MonitoringTabWidget()
         self._tab_widget.addTab(self._monitoring_tab, "Machine Monitoring")
+
+        # ---- Tab 3: Data Analysis ----
+        self._analysis_tab = AnalysisTabWidget()
+        self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
 
         main_layout.addWidget(self._tab_widget, 1)
 
@@ -1685,5 +1690,6 @@ class MainWindow(QMainWindow):
         self._uptime_timer.stop()
         self._scheduler.stop_all()
         self._monitoring_tab.stop_pipeline()
+        self._analysis_tab.cleanup()
         self._discovery.stop()
         super().closeEvent(event)

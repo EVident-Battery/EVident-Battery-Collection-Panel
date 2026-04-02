@@ -125,6 +125,12 @@ class AnalysisTabWidget(QWidget):
         self._type_combo.setMinimumWidth(140)
         lay.addWidget(self._type_combo, 1, 1)
 
+        self._save_signal_btn = QPushButton("Save as Signal")
+        self._save_signal_btn.setToolTip(
+            "Add the current result back as a new channel for further analysis")
+        self._save_signal_btn.setEnabled(False)
+        lay.addWidget(self._save_signal_btn, 2, 0, 1, 2)
+
         # _populate_categories() is called after all groups are created
         return grp
 
@@ -256,6 +262,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
         self._browse_btn.clicked.connect(self._on_browse)
+        self._save_signal_btn.clicked.connect(self._on_save_signal)
         self._category_combo.currentTextChanged.connect(self._on_category_changed)
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._channel_list.itemChanged.connect(self._schedule_analysis)
@@ -503,6 +510,14 @@ class AnalysisTabWidget(QWidget):
             self._log_y_cb.show()
             self._log_z_cb.hide()
 
+        # Enable "Save as Signal" for time-domain-compatible results
+        can_save = False
+        if not result.is_2d and self._signals:
+            n_original = len(next(iter(self._signals.values())))
+            can_save = any(len(y) == n_original
+                          for y in result.y_data.values())
+        self._save_signal_btn.setEnabled(can_save)
+
         # Update unit combos for the result's quantities
         self._update_unit_combos(result)
 
@@ -549,6 +564,41 @@ class AnalysisTabWidget(QWidget):
         log_z = self._log_z_cb.isChecked()
         self._plot_widget.plot(result, x_unit, y_unit, log_x, log_y, log_z,
                                all_channels=self._column_names)
+
+    # ------------------------------------------------------------------
+    @pyqtSlot()
+    def _on_save_signal(self) -> None:
+        """Add the current analysis result back as new channel(s)."""
+        result = self._last_result
+        if result is None or result.is_2d or not self._signals:
+            return
+
+        n_original = len(next(iter(self._signals.values())))
+        analysis = self._current_analysis()
+        suffix = analysis.name if analysis else "Derived"
+
+        saved = 0
+        self._channel_list.blockSignals(True)
+        for ch, y in result.y_data.items():
+            if len(y) != n_original:
+                continue
+            new_name = f"{ch} [{suffix}]"
+            self._signals[new_name] = y.copy()
+            if new_name not in self._column_names:
+                self._column_names.append(new_name)
+                item = QListWidgetItem(new_name)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Unchecked)
+                self._channel_list.addItem(item)
+            saved += 1
+        self._channel_list.blockSignals(False)
+
+        if saved:
+            self._log_widget.log(
+                f"Saved {saved} signal(s) as new channels — "
+                f"check them in the channel list to use",
+                LogLevel.SUCCESS,
+            )
 
     # ------------------------------------------------------------------
     def cleanup(self) -> None:

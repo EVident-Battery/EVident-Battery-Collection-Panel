@@ -96,6 +96,9 @@ class PlotWidget(QWidget):
             ax.plot(x, y, color=color, linewidth=0.8, alpha=0.85,
                     label=channel)
 
+        if result.metadata.get("equal_aspect"):
+            ax.set_aspect("equal", adjustable="datalim")
+
         if log_x:
             ax.set_xscale("log")
         if log_y:

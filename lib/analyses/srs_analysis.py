@@ -92,7 +92,6 @@ def _compute_srs(signal: np.ndarray, fs: float,
         b = np.array([b0, b1, b2])
         a = np.array([1.0, a1, a2])
         resp = lfilter(b, a, signal)
-        resp *= wn ** 2  # relative displacement -> pseudo-acceleration
         srs[i] = np.max(np.abs(resp))
 
     return srs

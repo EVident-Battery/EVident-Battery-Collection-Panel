@@ -68,6 +68,46 @@ class PlotWidget(QWidget):
         self._figure.clear()
         self._canvas.draw_idle()
 
+    def update_lines(self, result: AnalysisResult,
+                     x_unit: str, y_unit: str,
+                     all_channels: list | None = None) -> None:
+        """Fast-path for live data: reuse axes/lines, only update data."""
+        if result.is_2d:
+            # Fall back to full redraw for spectrograms
+            self.plot(result, x_unit, y_unit, False, False, False, all_channels)
+            return
+
+        ax = self._figure.axes[0] if self._figure.axes else None
+        existing = {l.get_label(): l for l in ax.get_lines()} if ax else {}
+        channels = list(result.x_data.keys())
+
+        # If axes don't exist or channel set changed, do one full draw
+        if ax is None or set(existing.keys()) != set(channels):
+            self.plot(result, x_unit, y_unit, False, False, False, all_channels)
+            # Tag lines so we can reuse them next tick
+            return
+
+        for channel in channels:
+            line = existing.get(channel)
+            if line is None:
+                continue
+            x = UnitConverter.convert(
+                result.x_data[channel],
+                result.x_axis.default_unit, x_unit,
+                result.x_axis.quantity,
+            )
+            y = UnitConverter.convert(
+                result.y_data[channel],
+                result.y_axis.default_unit, y_unit,
+                result.y_axis.quantity,
+            )
+            line.set_xdata(x)
+            line.set_ydata(y)
+
+        ax.relim()
+        ax.autoscale_view()
+        self._canvas.draw_idle()
+
     # ------------------------------------------------------------------
     def _plot_lines(self, result: AnalysisResult,
                     x_unit: str, y_unit: str,

@@ -340,6 +340,8 @@ class MainWindow(QMainWindow):
         # Wire live streaming data to analysis tab
         self._streaming_tab.live_frame.connect(self._analysis_tab.feed_live_frame)
         self._streaming_tab.stream_active_changed.connect(self._analysis_tab.set_stream_active)
+        self._analysis_tab.stream_start_requested.connect(self._streaming_tab._on_start)
+        self._analysis_tab.stream_stop_requested.connect(self._streaming_tab._on_stop)
 
         main_layout.addWidget(self._tab_widget, 1)
 

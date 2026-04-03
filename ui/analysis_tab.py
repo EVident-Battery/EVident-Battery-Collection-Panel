@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QListWidgetItem, QSplitter, QSpinBox, QDoubleSpinBox,
     QRadioButton, QButtonGroup, QStackedWidget,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 
 # Trigger analysis plugin registration on import
 import lib.analyses  # noqa: F401
@@ -37,6 +37,9 @@ _LIVE_CHANNELS = ["ax", "ay", "az", "gx", "gy", "gz"]
 class AnalysisTabWidget(QWidget):
     """Self-contained Data Analysis tab."""
 
+    stream_start_requested = pyqtSignal()
+    stream_stop_requested = pyqtSignal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
@@ -57,7 +60,7 @@ class AnalysisTabWidget(QWidget):
         self._live_bufs: Dict[str, deque] = {}
         self._live_dirty = False
         self._live_refresh_timer = QTimer()
-        self._live_refresh_timer.setInterval(500)
+        self._live_refresh_timer.setInterval(100)
         self._live_refresh_timer.timeout.connect(self._on_live_refresh)
 
         # Worker
@@ -153,6 +156,11 @@ class AnalysisTabWidget(QWidget):
         self._buf_unit_combo.addItems(["samples", "seconds"])
         self._buf_unit_combo.setCurrentIndex(0)
         lp_lay.addWidget(self._buf_unit_combo)
+        self._live_start_btn = QPushButton("Start")
+        self._live_stop_btn = QPushButton("Stop")
+        self._live_stop_btn.setEnabled(False)
+        lp_lay.addWidget(self._live_start_btn)
+        lp_lay.addWidget(self._live_stop_btn)
         self._live_status_label = QLabel("Not streaming")
         self._live_status_label.setStyleSheet("color: #94A3B8;")
         lp_lay.addWidget(self._live_status_label)
@@ -318,6 +326,8 @@ class AnalysisTabWidget(QWidget):
         self._browse_btn.clicked.connect(self._on_browse)
         self._buf_size_spin.valueChanged.connect(self._on_buffer_config_changed)
         self._buf_unit_combo.currentIndexChanged.connect(self._on_buffer_config_changed)
+        self._live_start_btn.clicked.connect(self.stream_start_requested)
+        self._live_stop_btn.clicked.connect(self.stream_stop_requested)
         self._save_signal_btn.clicked.connect(self._on_save_signal)
         self._category_combo.currentTextChanged.connect(self._on_category_changed)
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
@@ -510,6 +520,8 @@ class AnalysisTabWidget(QWidget):
     def set_stream_active(self, active: bool) -> None:
         """Called when the streaming tab starts/stops streaming."""
         self._live_stream_active = active
+        self._live_start_btn.setEnabled(not active)
+        self._live_stop_btn.setEnabled(active)
         if self._live_mode:
             if active:
                 self._init_live_buffers()
@@ -523,7 +535,7 @@ class AnalysisTabWidget(QWidget):
 
     @pyqtSlot()
     def _on_live_refresh(self) -> None:
-        """Periodically snapshot the live buffers and trigger analysis."""
+        """Periodically snapshot the live buffers and run analysis inline."""
         if not self._live_dirty:
             return
         self._live_dirty = False
@@ -535,7 +547,6 @@ class AnalysisTabWidget(QWidget):
         # Snapshot deques into signals dict
         self._fs = _LIVE_FS
         self._signals = {ch: np.array(buf) for ch, buf in self._live_bufs.items()}
-        n = len(self._signals[_LIVE_CHANNELS[0]])
 
         # Populate channels list if needed (only on first data or buffer resize)
         if self._column_names != _LIVE_CHANNELS:
@@ -553,7 +564,33 @@ class AnalysisTabWidget(QWidget):
                 self._channel_list.addItem(item)
             self._channel_list.blockSignals(False)
 
-        self._run_analysis()
+        # Run analysis synchronously (skip worker thread for low-latency updates)
+        analysis = self._current_analysis()
+        channels = self._selected_channels()
+        if analysis is None or not channels:
+            return
+
+        try:
+            from lib.analyses._transforms import apply_filter
+            params = self._collect_params()
+            filtered = apply_filter(
+                self._signals, self._fs,
+                params.get("filter_type", "None"),
+                params.get("filter_freq", 10.0),
+                params.get("filter_freq2", 1000.0),
+                params.get("filter_order", 4),
+            )
+            result = analysis.compute(self._fs, filtered, channels, **params)
+        except Exception:
+            return
+
+        self._last_result = result
+
+        # Fast-path plot update (reuse axes/lines instead of clearing)
+        x_unit = self._x_unit_combo.currentText() or result.x_axis.default_unit
+        y_unit = self._y_unit_combo.currentText() or result.y_axis.default_unit
+        self._plot_widget.update_lines(
+            result, x_unit, y_unit, all_channels=self._column_names)
 
     @pyqtSlot()
     def _on_browse(self) -> None:

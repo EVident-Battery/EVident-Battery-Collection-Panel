@@ -24,6 +24,7 @@ from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
 from ui.analysis_tab import AnalysisTabWidget
+from ui.streaming_tab import StreamingTabWidget
 
 
 # Stylesheet for the entire application
@@ -324,11 +325,15 @@ class MainWindow(QMainWindow):
 
         self._tab_widget.addTab(tab1, "Data Collection")
 
-        # ---- Tab 2: Machine Monitoring ----
+        # ---- Tab 2: Live Streaming ----
+        self._streaming_tab = StreamingTabWidget()
+        self._tab_widget.addTab(self._streaming_tab, "Live Streaming")
+
+        # ---- Tab 3: Machine Monitoring ----
         self._monitoring_tab = MonitoringTabWidget()
         self._tab_widget.addTab(self._monitoring_tab, "Machine Monitoring")
 
-        # ---- Tab 3: Data Analysis ----
+        # ---- Tab 4: Data Analysis ----
         self._analysis_tab = AnalysisTabWidget()
         self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
 
@@ -1081,6 +1086,7 @@ class MainWindow(QMainWindow):
 
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
+        self._streaming_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_device_lost(self, hostname: str) -> None:
@@ -1105,6 +1111,7 @@ class MainWindow(QMainWindow):
 
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
+        self._streaming_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_sensor_card_selected(self, hostname: str) -> None:
@@ -1448,6 +1455,7 @@ class MainWindow(QMainWindow):
 
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
+        self._streaming_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_manual_failed(self, error: str) -> None:
@@ -1690,6 +1698,7 @@ class MainWindow(QMainWindow):
         self._uptime_timer.stop()
         self._scheduler.stop_all()
         self._monitoring_tab.stop_pipeline()
+        self._streaming_tab.cleanup()
         self._analysis_tab.cleanup()
         self._discovery.stop()
         super().closeEvent(event)

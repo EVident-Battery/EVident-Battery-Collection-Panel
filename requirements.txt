@@ -15,3 +15,6 @@ scipy>=1.10.0
 pandas>=2.0.0
 matplotlib>=3.7.0
 
+# WebSocket client for live streaming
+websockets>=13.0
+

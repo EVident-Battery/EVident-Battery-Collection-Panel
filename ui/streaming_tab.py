@@ -13,7 +13,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -51,6 +51,10 @@ class _State(Enum):
 
 class StreamingTabWidget(QWidget):
     """Tab for live WebSocket streaming of IMU sensor data."""
+
+    # Forwarded signals for other tabs (e.g. analysis) to consume
+    live_frame = pyqtSignal(dict)
+    stream_active_changed = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -279,6 +283,7 @@ class StreamingTabWidget(QWidget):
             self._plot_timer.stop()
             self._set_state(_State.CONNECTED)
             self._log.info("Streaming stopped")
+        self.stream_active_changed.emit(is_on)
 
     @pyqtSlot(dict)
     def _on_data_received(self, frame: dict) -> None:
@@ -296,6 +301,7 @@ class StreamingTabWidget(QWidget):
         self._sample_count += 1
         self._last_temp = frame.get("temp", self._last_temp)
         self._data_dirty = True
+        self.live_frame.emit(frame)
 
     @pyqtSlot(str)
     def _on_error(self, msg: str) -> None:

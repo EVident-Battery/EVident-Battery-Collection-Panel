@@ -1,6 +1,7 @@
 """Data Analysis tab UI widget."""
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -10,6 +11,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QLineEdit, QFileDialog,
     QGroupBox, QGridLayout, QCheckBox, QListWidget,
     QListWidgetItem, QSplitter, QSpinBox, QDoubleSpinBox,
+    QRadioButton, QButtonGroup, QStackedWidget,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 
@@ -26,6 +28,10 @@ _INNER_GROUP_STYLE = """
     QGroupBox { border: none; background: transparent; margin-top: 12px; padding-top: 8px; }
     QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 8px; color: #94A3B8; }
 """
+
+
+_LIVE_FS = 50.0  # WebSocket IMU stream rate (Hz)
+_LIVE_CHANNELS = ["ax", "ay", "az", "gx", "gy", "gz"]
 
 
 class AnalysisTabWidget(QWidget):
@@ -45,6 +51,15 @@ class AnalysisTabWidget(QWidget):
         self._debounce_timer.setInterval(200)
         self._debounce_timer.timeout.connect(self._run_analysis)
 
+        # Live streaming state
+        self._live_mode = False
+        self._live_stream_active = False
+        self._live_bufs: Dict[str, deque] = {}
+        self._live_dirty = False
+        self._live_refresh_timer = QTimer()
+        self._live_refresh_timer.setInterval(500)
+        self._live_refresh_timer.timeout.connect(self._on_live_refresh)
+
         # Worker
         self._worker = AnalysisWorker()
 
@@ -63,7 +78,7 @@ class AnalysisTabWidget(QWidget):
         controls = QHBoxLayout()
         controls.setSpacing(12)
 
-        controls.addWidget(self._create_file_group())
+        controls.addWidget(self._create_source_group())
         controls.addWidget(self._create_analysis_group())
         controls.addWidget(self._create_channels_group())
         controls.addWidget(self._create_units_group())
@@ -90,22 +105,60 @@ class AnalysisTabWidget(QWidget):
         layout.addWidget(splitter, 1)
 
     # ------------------------------------------------------------------
-    def _create_file_group(self) -> QGroupBox:
-        grp = QGroupBox("File")
+    def _create_source_group(self) -> QGroupBox:
+        grp = QGroupBox("Source")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
         lay.setContentsMargins(8, 12, 8, 4)
 
+        # Radio toggle: File vs Live Stream
+        self._src_file_radio = QRadioButton("File")
+        self._src_live_radio = QRadioButton("Live Stream")
+        self._src_file_radio.setChecked(True)
+        src_btn_group = QButtonGroup(self)
+        src_btn_group.addButton(self._src_file_radio)
+        src_btn_group.addButton(self._src_live_radio)
+        lay.addWidget(self._src_file_radio, 0, 0)
+        lay.addWidget(self._src_live_radio, 0, 1)
+
+        # Stacked widget for source-specific controls
+        self._source_stack = QStackedWidget()
+
+        # Page 0: File controls
+        file_page = QWidget()
+        fp_lay = QHBoxLayout(file_page)
+        fp_lay.setContentsMargins(0, 0, 0, 0)
         self._file_edit = QLineEdit()
         self._file_edit.setReadOnly(True)
         self._file_edit.setPlaceholderText("No file selected")
-        self._file_edit.setMinimumWidth(180)
-        lay.addWidget(self._file_edit, 0, 0)
-
+        self._file_edit.setMinimumWidth(160)
+        fp_lay.addWidget(self._file_edit)
         self._browse_btn = QPushButton("Browse\u2026")
-        self._browse_btn.setMinimumWidth(90)
-        lay.addWidget(self._browse_btn, 0, 1)
+        self._browse_btn.setMinimumWidth(80)
+        fp_lay.addWidget(self._browse_btn)
+        self._source_stack.addWidget(file_page)
 
+        # Page 1: Live stream controls
+        live_page = QWidget()
+        lp_lay = QHBoxLayout(live_page)
+        lp_lay.setContentsMargins(0, 0, 0, 0)
+        lp_lay.addWidget(QLabel("Buffer:"))
+        self._buf_size_spin = QSpinBox()
+        self._buf_size_spin.setRange(16, 10000)
+        self._buf_size_spin.setValue(256)
+        self._buf_size_spin.setSingleStep(16)
+        self._buf_size_spin.setMinimumWidth(70)
+        lp_lay.addWidget(self._buf_size_spin)
+        self._buf_unit_combo = QComboBox()
+        self._buf_unit_combo.addItems(["samples", "seconds"])
+        self._buf_unit_combo.setCurrentIndex(0)
+        lp_lay.addWidget(self._buf_unit_combo)
+        self._live_status_label = QLabel("Not streaming")
+        self._live_status_label.setStyleSheet("color: #94A3B8;")
+        lp_lay.addWidget(self._live_status_label)
+        self._source_stack.addWidget(live_page)
+
+        lay.addWidget(self._source_stack, 1, 0, 1, 2)
         return grp
 
     # ------------------------------------------------------------------
@@ -261,7 +314,10 @@ class AnalysisTabWidget(QWidget):
     # Signal wiring
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
+        self._src_file_radio.toggled.connect(self._on_source_toggled)
         self._browse_btn.clicked.connect(self._on_browse)
+        self._buf_size_spin.valueChanged.connect(self._on_buffer_config_changed)
+        self._buf_unit_combo.currentIndexChanged.connect(self._on_buffer_config_changed)
         self._save_signal_btn.clicked.connect(self._on_save_signal)
         self._category_combo.currentTextChanged.connect(self._on_category_changed)
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
@@ -406,6 +462,98 @@ class AnalysisTabWidget(QWidget):
         visible = text == "Hilbert Envelope"
         self._smooth_label.setVisible(visible)
         self._smooth_spin.setVisible(visible)
+
+    # ------------------------------------------------------------------
+    # Source toggle & live streaming
+    # ------------------------------------------------------------------
+    @pyqtSlot(bool)
+    def _on_source_toggled(self, file_checked: bool) -> None:
+        """Switch between File and Live Stream source."""
+        self._live_mode = not file_checked
+        self._source_stack.setCurrentIndex(0 if file_checked else 1)
+        if self._live_mode:
+            self._init_live_buffers()
+            if self._live_stream_active:
+                self._live_refresh_timer.start()
+        else:
+            self._live_refresh_timer.stop()
+
+    @pyqtSlot()
+    def _on_buffer_config_changed(self) -> None:
+        """Buffer size or unit changed — reinitialise buffers."""
+        if self._live_mode:
+            self._init_live_buffers()
+
+    def _live_buffer_samples(self) -> int:
+        """Return buffer size in samples based on current UI settings."""
+        val = self._buf_size_spin.value()
+        if self._buf_unit_combo.currentText() == "seconds":
+            return max(1, int(val * _LIVE_FS))
+        return val
+
+    def _init_live_buffers(self) -> None:
+        """Create or resize the rolling deques for live data."""
+        n = self._live_buffer_samples()
+        self._live_bufs = {ch: deque(maxlen=n) for ch in _LIVE_CHANNELS}
+        self._live_dirty = False
+
+    @pyqtSlot(dict)
+    def feed_live_frame(self, frame: dict) -> None:
+        """Receive a single IMU frame from the streaming tab."""
+        if not self._live_mode:
+            return
+        for ch in _LIVE_CHANNELS:
+            self._live_bufs[ch].append(frame.get(ch, 0.0))
+        self._live_dirty = True
+
+    @pyqtSlot(bool)
+    def set_stream_active(self, active: bool) -> None:
+        """Called when the streaming tab starts/stops streaming."""
+        self._live_stream_active = active
+        if self._live_mode:
+            if active:
+                self._init_live_buffers()
+                self._live_refresh_timer.start()
+                self._live_status_label.setText("Streaming")
+                self._live_status_label.setStyleSheet("color: #34D399; font-weight: bold;")
+            else:
+                self._live_refresh_timer.stop()
+                self._live_status_label.setText("Stopped")
+                self._live_status_label.setStyleSheet("color: #FBBF24;")
+
+    @pyqtSlot()
+    def _on_live_refresh(self) -> None:
+        """Periodically snapshot the live buffers and trigger analysis."""
+        if not self._live_dirty:
+            return
+        self._live_dirty = False
+
+        # Need at least 2 samples for any meaningful analysis
+        if not self._live_bufs or len(self._live_bufs[_LIVE_CHANNELS[0]]) < 2:
+            return
+
+        # Snapshot deques into signals dict
+        self._fs = _LIVE_FS
+        self._signals = {ch: np.array(buf) for ch, buf in self._live_bufs.items()}
+        n = len(self._signals[_LIVE_CHANNELS[0]])
+
+        # Populate channels list if needed (only on first data or buffer resize)
+        if self._column_names != _LIVE_CHANNELS:
+            self._column_names = list(_LIVE_CHANNELS)
+            nyquist = _LIVE_FS / 2.0 * 0.95
+            self._filter_freq_spin.setMaximum(nyquist)
+            self._filter_freq2_spin.setMaximum(nyquist)
+
+            self._channel_list.blockSignals(True)
+            self._channel_list.clear()
+            for col in _LIVE_CHANNELS:
+                item = QListWidgetItem(col)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
+                self._channel_list.addItem(item)
+            self._channel_list.blockSignals(False)
+
+        self._run_analysis()
 
     @pyqtSlot()
     def _on_browse(self) -> None:
@@ -603,6 +751,7 @@ class AnalysisTabWidget(QWidget):
     # ------------------------------------------------------------------
     def cleanup(self) -> None:
         """Stop any running worker thread (called on app close)."""
+        self._live_refresh_timer.stop()
         if self._worker.isRunning():
             self._worker.quit()
             self._worker.wait(2000)

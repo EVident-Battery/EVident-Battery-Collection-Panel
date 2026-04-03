@@ -337,6 +337,10 @@ class MainWindow(QMainWindow):
         self._analysis_tab = AnalysisTabWidget()
         self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
 
+        # Wire live streaming data to analysis tab
+        self._streaming_tab.live_frame.connect(self._analysis_tab.feed_live_frame)
+        self._streaming_tab.stream_active_changed.connect(self._analysis_tab.set_stream_active)
+
         main_layout.addWidget(self._tab_widget, 1)
 
         # Start uptime timer

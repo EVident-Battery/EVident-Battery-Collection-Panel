@@ -35,5 +35,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['media\\favicon_white.ico'],
+    icon=['media/favicon_white.icns'],
+)
+app = BUNDLE(
+    exe,
+    name='EvidentBatteryHub.app',
+    icon='media/favicon_white.icns',
+    bundle_identifier=None,
 )

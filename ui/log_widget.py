@@ -12,6 +12,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QColor, QTextCursor, QFont, QTextCharFormat
 
+from ui.fonts import MONO_FONT_FAMILY
+
 
 class LogLevel(Enum):
     """Log message severity levels."""
@@ -108,7 +110,7 @@ class LogWidget(QWidget):
         # Log text area
         self._text_edit = QTextEdit()
         self._text_edit.setReadOnly(True)
-        self._text_edit.setFont(QFont("Consolas", 10))
+        self._text_edit.setFont(QFont(MONO_FONT_FAMILY, 10))
         self._text_edit.setStyleSheet("""
             QTextEdit {
                 background-color: #0F172A;

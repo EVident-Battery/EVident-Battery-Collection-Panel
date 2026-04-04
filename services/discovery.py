@@ -1,8 +1,12 @@
 """Sensor discovery service using Zeroconf/mDNS."""
+import logging
 import re
+import sys
 from typing import Dict
 
-from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
+from zeroconf import Zeroconf, ServiceBrowser, ServiceListener, IPVersion
+
+log = logging.getLogger(__name__)
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 
 
@@ -68,7 +72,12 @@ class DiscoveryController(QObject):
         if self._zeroconf is not None:
             return
         self._has_found_device = False
-        self._zeroconf = Zeroconf()
+        if sys.platform == "darwin":
+            self._zeroconf = Zeroconf(
+                interfaces=["0.0.0.0"], apple_p2p=True, ip_version=IPVersion.V4Only
+            )
+        else:
+            self._zeroconf = Zeroconf()
         self._browser = ServiceBrowser(
             self._zeroconf, "_evbs._tcp.local.", _Listener(self.signals)
         )

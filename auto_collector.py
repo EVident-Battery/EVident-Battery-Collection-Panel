@@ -18,6 +18,8 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QGuiApplication, QFont
 
+from ui.fonts import DEFAULT_FONT_FAMILY
+
 from ui.main_window import MainWindow
 
 
@@ -50,7 +52,7 @@ def main() -> int:
     app.setOrganizationName("SensorQA")
     
     # Set default font
-    font = QFont("Segoe UI", 10)
+    font = QFont(DEFAULT_FONT_FAMILY, 10)
     app.setFont(font)
     
     # Create and show main window

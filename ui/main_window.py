@@ -238,8 +238,8 @@ class WelcomeDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Before You Begin")
-        self.setFixedSize(520, 420)
+        self.setWindowTitle("Notice")
+        self.setFixedSize(480, 340)
         self.setModal(True)
         self.setStyleSheet("""
             QDialog {
@@ -283,24 +283,24 @@ class WelcomeDialog(QDialog):
 
         body_html = (
             '<p style="color:#CBD5E1; font-size:12px;">'
-            'This software automatically discovers your sensor on the network using mDNS. '
-            'For discovery to work, your computer and the sensor must be on the same network. '
-            'There are two ways to set this up:'
+            'For the software to communicate with a sensor, whether via auto-discovery or '
+            'manual IP entry, your computer and the sensor must be on the same network:'
             '</p>'
             '<p style="color:#3B82F6; font-size:13px; font-weight:bold; margin-bottom:2px;">'
-            'Option 1 — Wi-Fi Mode'
+            'Wi-Fi Mode'
             '</p>'
             '<p style="color:#CBD5E1; font-size:12px; margin-top:0px;">'
-            'The sensor is connected to your Wi-Fi network. Connect your computer to that '
-            'same Wi-Fi network, and the sensor will appear automatically.'
+            'Connect your computer and sensor to the same network.'
             '</p>'
             '<p style="color:#3B82F6; font-size:13px; font-weight:bold; margin-bottom:2px;">'
-            'Option 2 — Access Point (AP) Mode'
+            'AP Mode'
             '</p>'
             '<p style="color:#CBD5E1; font-size:12px; margin-top:0px;">'
-            'The sensor broadcasts its own Wi-Fi network. Connect your computer directly to '
-            "the sensor's network (look for it in your Wi-Fi list), and it will appear "
-            'automatically once connected.'
+            "Connect your computer directly to the sensor's access point "
+            '(e.g., EVBS_xxxxx).'
+            '</p>'
+            '<p style="color:#CBD5E1; font-size:12px;">'
+            'Once connected, the sensor\'s IP will populate automatically.'
             '</p>'
         )
         body = QLabel(body_html)

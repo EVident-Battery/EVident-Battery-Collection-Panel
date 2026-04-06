@@ -233,6 +233,95 @@ QTabBar::tab:hover:!selected {
 """
 
 
+class WelcomeDialog(QDialog):
+    """Startup dialog explaining network setup for sensor discovery."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Before You Begin")
+        self.setFixedSize(520, 420)
+        self.setModal(True)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F172A;
+            }
+            QLabel#title {
+                color: #E2E8F0;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLabel#body {
+                color: #CBD5E1;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            QPushButton#okButton {
+                background-color: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 32px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton#okButton:hover {
+                background-color: #60A5FA;
+            }
+            QPushButton#okButton:pressed {
+                background-color: #2563EB;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(16)
+
+        title = QLabel("Before You Begin")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignLeft)
+        layout.addWidget(title)
+
+        body_html = (
+            '<p style="color:#CBD5E1; font-size:12px;">'
+            'This software automatically discovers your sensor on the network using mDNS. '
+            'For discovery to work, your computer and the sensor must be on the same network. '
+            'There are two ways to set this up:'
+            '</p>'
+            '<p style="color:#3B82F6; font-size:13px; font-weight:bold; margin-bottom:2px;">'
+            'Option 1 — Wi-Fi Mode'
+            '</p>'
+            '<p style="color:#CBD5E1; font-size:12px; margin-top:0px;">'
+            'The sensor is connected to your Wi-Fi network. Connect your computer to that '
+            'same Wi-Fi network, and the sensor will appear automatically.'
+            '</p>'
+            '<p style="color:#3B82F6; font-size:13px; font-weight:bold; margin-bottom:2px;">'
+            'Option 2 — Access Point (AP) Mode'
+            '</p>'
+            '<p style="color:#CBD5E1; font-size:12px; margin-top:0px;">'
+            'The sensor broadcasts its own Wi-Fi network. Connect your computer directly to '
+            "the sensor's network (look for it in your Wi-Fi list), and it will appear "
+            'automatically once connected.'
+            '</p>'
+        )
+        body = QLabel(body_html)
+        body.setObjectName("body")
+        body.setWordWrap(True)
+        body.setTextFormat(Qt.RichText)
+        layout.addWidget(body)
+
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setObjectName("okButton")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setFixedWidth(100)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+
 class MainWindow(QMainWindow):
     """Main application window - Evident Battery Device Hub."""
 
@@ -264,6 +353,9 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._connect_signals()
         self._start_discovery()
+
+        # Show welcome dialog on first launch
+        WelcomeDialog(self).exec_()
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Evident Battery Device Hub")

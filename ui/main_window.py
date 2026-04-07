@@ -426,9 +426,13 @@ class MainWindow(QMainWindow):
         self._streaming_tab.hide()
         # self._tab_widget.addTab(self._streaming_tab, "Live Streaming")
 
-        # ---- Tab 3: Data Analysis ----
+        # ---- Tab 3: Data Analysis (HIDDEN on standard branch) ----
+        # The widget is still instantiated so existing wiring (update_sensors,
+        # cleanup, streaming hookups) keeps working — it's just not added as a
+        # visible tab in this build.
         self._analysis_tab = AnalysisTabWidget()
-        self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
+        self._analysis_tab.hide()
+        # self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
 
         # ---- Tab 4: AI Monitoring ----
         self._monitoring_tab = MonitoringTabWidget()

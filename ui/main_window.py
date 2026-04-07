@@ -426,13 +426,13 @@ class MainWindow(QMainWindow):
         self._streaming_tab.hide()
         # self._tab_widget.addTab(self._streaming_tab, "Live Streaming")
 
-        # ---- Tab 3: Machine Monitoring ----
-        self._monitoring_tab = MonitoringTabWidget()
-        self._tab_widget.addTab(self._monitoring_tab, "Machine Monitoring")
-
-        # ---- Tab 4: Data Analysis ----
+        # ---- Tab 3: Data Analysis ----
         self._analysis_tab = AnalysisTabWidget()
         self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
+
+        # ---- Tab 4: AI Monitoring ----
+        self._monitoring_tab = MonitoringTabWidget()
+        self._tab_widget.addTab(self._monitoring_tab, "AI Monitoring")
 
         # Wire live streaming data + control flow to/from the analysis tab
         self._streaming_tab.live_frame.connect(self._analysis_tab.feed_live_frame)

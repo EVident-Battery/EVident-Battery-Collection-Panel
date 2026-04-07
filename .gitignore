@@ -4,3 +4,4 @@ SensorQA-master
 build/
 dist/
 aws_code.py
+*.pyc

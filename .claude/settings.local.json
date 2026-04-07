@@ -7,7 +7,10 @@
       "Bash(find C:UsersandrewsalinasPycharmProjectsDataCollectionPanel -name *.csv -type f)",
       "Bash(grep -r \"cumsum\\\\|integrate\\\\|trapz\\\\|simps\" C:UsersandrewsalinasPycharmProjectsDataCollectionPanel --include=*.py)",
       "Bash(git checkout:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(ls:*)",
+      "Bash(python3 -m venv venv_macOS_arm)"
     ]
   }
 }

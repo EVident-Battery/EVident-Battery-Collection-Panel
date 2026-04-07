@@ -124,7 +124,7 @@ class AnalysisTabWidget(QWidget):
         # Reserve enough vertical room for the controls plus the horizontal
         # scrollbar that appears when the viewport is narrower than the content.
         controls_scroll.setFixedHeight(
-            controls_container.sizeHint().height() + 16
+            controls_container.sizeHint().height() + 36
         )
         layout.addWidget(controls_scroll)
 
@@ -148,9 +148,9 @@ class AnalysisTabWidget(QWidget):
     def _create_source_group(self) -> QGroupBox:
         grp = QGroupBox("Source")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
-        grp.setMinimumWidth(480)
+        grp.setMinimumWidth(700)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 12, 8, 4)
+        lay.setContentsMargins(8, 18, 8, 12)
 
         # Radio toggle: File vs Live Stream
         self._src_file_radio = QRadioButton("File")
@@ -173,35 +173,37 @@ class AnalysisTabWidget(QWidget):
         self._file_edit.setReadOnly(True)
         self._file_edit.setPlaceholderText("No file selected")
         self._file_edit.setMinimumWidth(160)
+        self._file_edit.setMaximumWidth(360)
         fp_lay.addWidget(self._file_edit)
         self._browse_btn = QPushButton("Browse\u2026")
         self._browse_btn.setMinimumWidth(80)
         fp_lay.addWidget(self._browse_btn)
+        fp_lay.addStretch(1)
         self._source_stack.addWidget(file_page)
 
         # Page 1: Live stream controls (two rows)
         live_page = QWidget()
         lp_lay = QVBoxLayout(live_page)
         lp_lay.setContentsMargins(0, 0, 0, 0)
-        lp_lay.setSpacing(4)
+        lp_lay.setSpacing(8)
 
         # Row 1: sensor + connect/disconnect + status
         row1 = QHBoxLayout()
-        row1.setSpacing(10)
+        row1.setSpacing(12)
         row1.addWidget(QLabel("Sensor:"))
         self._live_sensor_combo = QComboBox()
-        self._live_sensor_combo.setMinimumWidth(160)
+        self._live_sensor_combo.setMinimumWidth(180)
         row1.addWidget(self._live_sensor_combo, 1)
-        row1.addSpacing(10)  # extra breathing room before Connect
+        row1.addSpacing(18)  # extra breathing room before Connect
         self._live_connect_btn = QPushButton("Connect")
-        self._live_connect_btn.setMinimumWidth(100)
+        self._live_connect_btn.setFixedWidth(110)
         self._live_connect_btn.setEnabled(False)
         row1.addWidget(self._live_connect_btn)
         self._live_disconnect_btn = QPushButton("Disconnect")
-        self._live_disconnect_btn.setMinimumWidth(120)
+        self._live_disconnect_btn.setFixedWidth(135)
         self._live_disconnect_btn.setEnabled(False)
         row1.addWidget(self._live_disconnect_btn)
-        row1.addSpacing(12)  # extra breathing room before status indicator
+        row1.addSpacing(20)  # extra breathing room before status indicator
         self._live_status_label = QLabel("● Disconnected")
         self._live_status_label.setStyleSheet("color: #94A3B8; font-weight: bold;")
         row1.addWidget(self._live_status_label)
@@ -242,7 +244,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Analysis")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 12, 8, 4)
+        lay.setContentsMargins(8, 18, 8, 12)
 
         lay.addWidget(QLabel("Category:"), 0, 0)
         self._category_combo = QComboBox()
@@ -268,7 +270,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Channels")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QVBoxLayout(grp)
-        lay.setContentsMargins(8, 12, 8, 4)
+        lay.setContentsMargins(8, 18, 8, 12)
 
         self._channel_list = QListWidget()
         self._channel_list.setMaximumHeight(80)
@@ -282,7 +284,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Units && Scale")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 12, 8, 4)
+        lay.setContentsMargins(8, 18, 8, 12)
 
         lay.addWidget(QLabel("X Unit:"), 0, 0)
         self._x_unit_combo = QComboBox()
@@ -312,7 +314,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Signal Processing")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         lay = QGridLayout(grp)
-        lay.setContentsMargins(8, 12, 8, 4)
+        lay.setContentsMargins(8, 18, 8, 12)
 
         # --- Filter ---
         lay.addWidget(QLabel("Filter:"), 0, 0)
@@ -382,7 +384,7 @@ class AnalysisTabWidget(QWidget):
         grp = QGroupBox("Parameters")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
         self._params_layout = QGridLayout(grp)
-        self._params_layout.setContentsMargins(8, 12, 8, 4)
+        self._params_layout.setContentsMargins(8, 18, 8, 12)
         grp.hide()
         return grp
 

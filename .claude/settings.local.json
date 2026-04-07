@@ -10,7 +10,9 @@
       "Bash(xargs grep:*)",
       "Bash(git ls-tree:*)",
       "Bash(ls:*)",
-      "Bash(python3 -m venv venv_macOS_arm)"
+      "Bash(python3 -m venv venv_macOS_arm)",
+      "Bash(grep -i -E \"\\\\.md$|\\\\.spec$|build.sh\")",
+      "Bash(grep -i -E \"\\\\.md$|\\\\.spec$|\\\\.sh$\")"
     ]
   }
 }

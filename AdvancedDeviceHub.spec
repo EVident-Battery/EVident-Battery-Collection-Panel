@@ -35,5 +35,10 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['media\\favicon_white.ico'],
+)
+app = BUNDLE(
+    exe,
+    name='AdvancedDeviceHub.app',
+    icon=None,
+    bundle_identifier=None,
 )

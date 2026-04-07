@@ -417,9 +417,14 @@ class MainWindow(QMainWindow):
 
         self._tab_widget.addTab(tab1, "Data Collection")
 
-        # ---- Tab 2: Live Streaming ----
+        # ---- Tab 2: Live Streaming (DEPRECATED) ----
+        # The standalone Live Streaming tab is now redundant — its connection
+        # and start/stop controls have been moved into the Data Analysis tab's
+        # "Live Stream" source mode. The widget itself is still constructed
+        # (hidden) so its StreamingWorker pipeline can drive the analysis tab.
         self._streaming_tab = StreamingTabWidget()
-        self._tab_widget.addTab(self._streaming_tab, "Live Streaming")
+        self._streaming_tab.hide()
+        # self._tab_widget.addTab(self._streaming_tab, "Live Streaming")
 
         # ---- Tab 3: Machine Monitoring ----
         self._monitoring_tab = MonitoringTabWidget()
@@ -429,11 +434,14 @@ class MainWindow(QMainWindow):
         self._analysis_tab = AnalysisTabWidget()
         self._tab_widget.addTab(self._analysis_tab, "Data Analysis")
 
-        # Wire live streaming data to analysis tab
+        # Wire live streaming data + control flow to/from the analysis tab
         self._streaming_tab.live_frame.connect(self._analysis_tab.feed_live_frame)
         self._streaming_tab.stream_active_changed.connect(self._analysis_tab.set_stream_active)
+        self._streaming_tab.connection_state_changed.connect(self._analysis_tab.set_connection_state)
         self._analysis_tab.stream_start_requested.connect(self._streaming_tab._on_start)
         self._analysis_tab.stream_stop_requested.connect(self._streaming_tab._on_stop)
+        self._analysis_tab.connect_requested.connect(self._streaming_tab.connect_to_ip)
+        self._analysis_tab.disconnect_requested.connect(self._streaming_tab._on_disconnect)
 
         main_layout.addWidget(self._tab_widget, 1)
 
@@ -1185,6 +1193,7 @@ class MainWindow(QMainWindow):
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
         self._streaming_tab.update_sensors(self._sensors)
+        self._analysis_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_device_lost(self, hostname: str) -> None:
@@ -1210,6 +1219,7 @@ class MainWindow(QMainWindow):
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
         self._streaming_tab.update_sensors(self._sensors)
+        self._analysis_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_sensor_card_selected(self, hostname: str) -> None:
@@ -1554,6 +1564,7 @@ class MainWindow(QMainWindow):
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
         self._streaming_tab.update_sensors(self._sensors)
+        self._analysis_tab.update_sensors(self._sensors)
 
     @pyqtSlot(str)
     def _on_manual_failed(self, error: str) -> None:

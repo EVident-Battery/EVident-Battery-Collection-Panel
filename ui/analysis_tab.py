@@ -39,6 +39,8 @@ class AnalysisTabWidget(QWidget):
 
     stream_start_requested = pyqtSignal()
     stream_stop_requested = pyqtSignal()
+    connect_requested = pyqtSignal(str)  # IP
+    disconnect_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -57,6 +59,7 @@ class AnalysisTabWidget(QWidget):
         # Live streaming state
         self._live_mode = False
         self._live_stream_active = False
+        self._live_connection_state = "disconnected"
         self._live_bufs: Dict[str, deque] = {}
         self._live_dirty = False
         self._live_refresh_timer = QTimer()
@@ -111,6 +114,7 @@ class AnalysisTabWidget(QWidget):
     def _create_source_group(self) -> QGroupBox:
         grp = QGroupBox("Source")
         grp.setStyleSheet(_INNER_GROUP_STYLE)
+        grp.setMinimumWidth(480)
         lay = QGridLayout(grp)
         lay.setContentsMargins(8, 12, 8, 4)
 
@@ -141,29 +145,57 @@ class AnalysisTabWidget(QWidget):
         fp_lay.addWidget(self._browse_btn)
         self._source_stack.addWidget(file_page)
 
-        # Page 1: Live stream controls
+        # Page 1: Live stream controls (two rows)
         live_page = QWidget()
-        lp_lay = QHBoxLayout(live_page)
+        lp_lay = QVBoxLayout(live_page)
         lp_lay.setContentsMargins(0, 0, 0, 0)
-        lp_lay.addWidget(QLabel("Buffer:"))
+        lp_lay.setSpacing(4)
+
+        # Row 1: sensor + connect/disconnect + status
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        row1.addWidget(QLabel("Sensor:"))
+        self._live_sensor_combo = QComboBox()
+        self._live_sensor_combo.setMinimumWidth(160)
+        row1.addWidget(self._live_sensor_combo, 1)
+        self._live_connect_btn = QPushButton("Connect")
+        self._live_connect_btn.setMinimumWidth(78)
+        self._live_connect_btn.setEnabled(False)
+        row1.addWidget(self._live_connect_btn)
+        self._live_disconnect_btn = QPushButton("Disconnect")
+        self._live_disconnect_btn.setMinimumWidth(88)
+        self._live_disconnect_btn.setEnabled(False)
+        row1.addWidget(self._live_disconnect_btn)
+        self._live_status_label = QLabel("● Disconnected")
+        self._live_status_label.setStyleSheet("color: #94A3B8; font-weight: bold;")
+        row1.addWidget(self._live_status_label)
+        lp_lay.addLayout(row1)
+
+        # Row 2: buffer config + start/stop streaming
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.addWidget(QLabel("Buffer:"))
         self._buf_size_spin = QSpinBox()
         self._buf_size_spin.setRange(16, 10000)
         self._buf_size_spin.setValue(256)
         self._buf_size_spin.setSingleStep(16)
         self._buf_size_spin.setMinimumWidth(70)
-        lp_lay.addWidget(self._buf_size_spin)
+        row2.addWidget(self._buf_size_spin)
         self._buf_unit_combo = QComboBox()
         self._buf_unit_combo.addItems(["samples", "seconds"])
         self._buf_unit_combo.setCurrentIndex(0)
-        lp_lay.addWidget(self._buf_unit_combo)
+        row2.addWidget(self._buf_unit_combo)
+        row2.addStretch(1)
         self._live_start_btn = QPushButton("Start")
+        self._live_start_btn.setMinimumWidth(78)
+        self._live_start_btn.setEnabled(False)
         self._live_stop_btn = QPushButton("Stop")
+        self._live_stop_btn.setMinimumWidth(88)
         self._live_stop_btn.setEnabled(False)
-        lp_lay.addWidget(self._live_start_btn)
-        lp_lay.addWidget(self._live_stop_btn)
-        self._live_status_label = QLabel("Not streaming")
-        self._live_status_label.setStyleSheet("color: #94A3B8;")
-        lp_lay.addWidget(self._live_status_label)
+        row2.addWidget(self._live_start_btn)
+        row2.addWidget(self._live_stop_btn)
+        lp_lay.addLayout(row2)
+
         self._source_stack.addWidget(live_page)
 
         lay.addWidget(self._source_stack, 1, 0, 1, 2)
@@ -326,6 +358,8 @@ class AnalysisTabWidget(QWidget):
         self._browse_btn.clicked.connect(self._on_browse)
         self._buf_size_spin.valueChanged.connect(self._on_buffer_config_changed)
         self._buf_unit_combo.currentIndexChanged.connect(self._on_buffer_config_changed)
+        self._live_connect_btn.clicked.connect(self._on_live_connect_clicked)
+        self._live_disconnect_btn.clicked.connect(self.disconnect_requested)
         self._live_start_btn.clicked.connect(self.stream_start_requested)
         self._live_stop_btn.clicked.connect(self.stream_stop_requested)
         self._save_signal_btn.clicked.connect(self._on_save_signal)
@@ -518,20 +552,65 @@ class AnalysisTabWidget(QWidget):
 
     @pyqtSlot(bool)
     def set_stream_active(self, active: bool) -> None:
-        """Called when the streaming tab starts/stops streaming."""
+        """Called when the streaming worker starts/stops streaming."""
         self._live_stream_active = active
-        self._live_start_btn.setEnabled(not active)
-        self._live_stop_btn.setEnabled(active)
         if self._live_mode:
             if active:
                 self._init_live_buffers()
                 self._live_refresh_timer.start()
-                self._live_status_label.setText("Streaming")
-                self._live_status_label.setStyleSheet("color: #34D399; font-weight: bold;")
             else:
                 self._live_refresh_timer.stop()
-                self._live_status_label.setText("Stopped")
-                self._live_status_label.setStyleSheet("color: #FBBF24;")
+        # Button enable/disable is driven by set_connection_state()
+        self._refresh_live_buttons()
+
+    def update_sensors(self, sensors: Dict[str, "object"]) -> None:
+        """Populate the live-stream sensor combo (called from MainWindow)."""
+        current = self._live_sensor_combo.currentData()
+        self._live_sensor_combo.blockSignals(True)
+        self._live_sensor_combo.clear()
+        for hostname, cfg in sensors.items():
+            ip = getattr(cfg, "ip", None)
+            if not ip:
+                continue
+            self._live_sensor_combo.addItem(f"{hostname} ({ip})", ip)
+        # Restore prior selection if still present
+        if current is not None:
+            idx = self._live_sensor_combo.findData(current)
+            if idx >= 0:
+                self._live_sensor_combo.setCurrentIndex(idx)
+        self._live_sensor_combo.blockSignals(False)
+        self._refresh_live_buttons()
+
+    @pyqtSlot(str)
+    def set_connection_state(self, state: str) -> None:
+        """Mirror the streaming worker's connection state on our buttons/labels."""
+        self._live_connection_state = state
+        labels = {
+            "disconnected": ("● Disconnected", "#94A3B8"),
+            "connecting":   ("● Connecting…", "#FBBF24"),
+            "connected":    ("● Connected",    "#34D399"),
+            "streaming":    ("● Streaming",    "#34D399"),
+        }
+        text, color = labels.get(state, ("● —", "#94A3B8"))
+        self._live_status_label.setText(text)
+        self._live_status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self._refresh_live_buttons()
+
+    def _refresh_live_buttons(self) -> None:
+        """Enable/disable connect/disconnect/start/stop based on current state."""
+        s = self._live_connection_state
+        has_sensor = self._live_sensor_combo.count() > 0
+        self._live_sensor_combo.setEnabled(s == "disconnected")
+        self._live_connect_btn.setEnabled(s == "disconnected" and has_sensor)
+        self._live_disconnect_btn.setEnabled(s in ("connecting", "connected", "streaming"))
+        self._live_start_btn.setEnabled(s == "connected")
+        self._live_stop_btn.setEnabled(s == "streaming")
+
+    @pyqtSlot()
+    def _on_live_connect_clicked(self) -> None:
+        ip = self._live_sensor_combo.currentData()
+        if ip:
+            self.connect_requested.emit(ip)
 
     @pyqtSlot()
     def _on_live_refresh(self) -> None:

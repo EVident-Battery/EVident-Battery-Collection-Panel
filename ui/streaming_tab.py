@@ -55,6 +55,7 @@ class StreamingTabWidget(QWidget):
     # Forwarded signals for other tabs (e.g. analysis) to consume
     live_frame = pyqtSignal(dict)
     stream_active_changed = pyqtSignal(bool)
+    connection_state_changed = pyqtSignal(str)  # "disconnected"|"connecting"|"connected"|"streaming"
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -226,6 +227,12 @@ class StreamingTabWidget(QWidget):
         ip = self._sensor_combo.currentData()
         if not ip:
             return
+        self.connect_to_ip(ip)
+
+    def connect_to_ip(self, ip: str) -> None:
+        """Public entry point so external widgets can request a connection."""
+        if not ip or self._state != _State.DISCONNECTED:
+            return
         self._set_state(_State.CONNECTING)
         self._log.info(f"Connecting to {ip}:81 ...")
 
@@ -364,6 +371,15 @@ class StreamingTabWidget(QWidget):
         text, color = labels[s]
         self._status_label.setText(f"● {text}")
         self._status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+        # Notify external listeners (e.g. analysis tab embedding these controls)
+        state_names = {
+            _State.DISCONNECTED: "disconnected",
+            _State.CONNECTING: "connecting",
+            _State.CONNECTED: "connected",
+            _State.STREAMING: "streaming",
+        }
+        self.connection_state_changed.emit(state_names[s])
 
     # -- helpers --
 

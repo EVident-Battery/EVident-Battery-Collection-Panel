@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QGridLayout, QCheckBox, QListWidget,
     QListWidgetItem, QSplitter, QSpinBox, QDoubleSpinBox,
     QRadioButton, QButtonGroup, QStackedWidget,
+    QScrollArea, QFrame, QSizePolicy,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 
@@ -28,6 +29,25 @@ _INNER_GROUP_STYLE = """
     QGroupBox { border: none; background: transparent; margin-top: 12px; padding-top: 8px; }
     QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 8px; color: #94A3B8; }
 """
+
+
+class _HorizontalScrollArea(QScrollArea):
+    """QScrollArea where Shift+wheel scrolls horizontally.
+
+    Used for the Data Analysis tab's controls strip — vertical scrolling is
+    disabled, so a normal wheel does nothing; holding Shift converts the
+    vertical wheel delta into a horizontal scroll, matching common UX
+    conventions for horizontally-scrollable content.
+    """
+
+    def wheelEvent(self, event):  # noqa: N802 (Qt naming)
+        if event.modifiers() & Qt.ShiftModifier:
+            delta = event.angleDelta().y()
+            hbar = self.horizontalScrollBar()
+            hbar.setValue(hbar.value() - delta)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 _LIVE_FS = 50.0  # WebSocket IMU stream rate (Hz)
@@ -80,9 +100,11 @@ class AnalysisTabWidget(QWidget):
         layout.setContentsMargins(12, 8, 12, 4)
         layout.setSpacing(8)
 
-        # ---- Controls strip ----
-        controls = QHBoxLayout()
+        # ---- Controls strip (horizontally scrollable when window is narrow) ----
+        controls_container = QWidget()
+        controls = QHBoxLayout(controls_container)
         controls.setSpacing(12)
+        controls.setContentsMargins(0, 0, 0, 0)
 
         controls.addWidget(self._create_source_group())
         controls.addWidget(self._create_analysis_group())
@@ -92,7 +114,19 @@ class AnalysisTabWidget(QWidget):
         self._params_group = self._create_params_group()
         controls.addWidget(self._params_group)
 
-        layout.addLayout(controls)
+        controls_scroll = _HorizontalScrollArea()
+        controls_scroll.setWidget(controls_container)
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        controls_scroll.setFrameShape(QFrame.NoFrame)
+        controls_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Reserve enough vertical room for the controls plus the horizontal
+        # scrollbar that appears when the viewport is narrower than the content.
+        controls_scroll.setFixedHeight(
+            controls_container.sizeHint().height() + 16
+        )
+        layout.addWidget(controls_scroll)
 
         # Now that all groups exist, populate the category combo
         self._populate_categories()
@@ -153,19 +187,21 @@ class AnalysisTabWidget(QWidget):
 
         # Row 1: sensor + connect/disconnect + status
         row1 = QHBoxLayout()
-        row1.setSpacing(6)
+        row1.setSpacing(10)
         row1.addWidget(QLabel("Sensor:"))
         self._live_sensor_combo = QComboBox()
         self._live_sensor_combo.setMinimumWidth(160)
         row1.addWidget(self._live_sensor_combo, 1)
+        row1.addSpacing(10)  # extra breathing room before Connect
         self._live_connect_btn = QPushButton("Connect")
-        self._live_connect_btn.setMinimumWidth(78)
+        self._live_connect_btn.setMinimumWidth(100)
         self._live_connect_btn.setEnabled(False)
         row1.addWidget(self._live_connect_btn)
         self._live_disconnect_btn = QPushButton("Disconnect")
-        self._live_disconnect_btn.setMinimumWidth(88)
+        self._live_disconnect_btn.setMinimumWidth(120)
         self._live_disconnect_btn.setEnabled(False)
         row1.addWidget(self._live_disconnect_btn)
+        row1.addSpacing(12)  # extra breathing room before status indicator
         self._live_status_label = QLabel("● Disconnected")
         self._live_status_label.setStyleSheet("color: #94A3B8; font-weight: bold;")
         row1.addWidget(self._live_status_label)

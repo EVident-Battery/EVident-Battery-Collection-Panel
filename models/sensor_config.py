@@ -139,8 +139,8 @@ class SensorConfig:
     duration: int = 10  # seconds
     interval_value: int = 5
     interval_unit: IntervalUnit = IntervalUnit.MINUTES
-    sample_rate: SampleRate = SampleRate.HZ_104
-    accel_range: AccelRange = AccelRange.G_4
+    sample_rate: SampleRate = SampleRate.HZ_1666
+    accel_range: AccelRange = AccelRange.G_16
     output_folder: Optional[Path] = None
     upload_to_aws: bool = False
 

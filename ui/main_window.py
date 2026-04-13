@@ -919,7 +919,7 @@ class MainWindow(QMainWindow):
         self._odr_combo = QComboBox()
         for rate in SampleRate.all_rates():
             self._odr_combo.addItem(rate.display_name, rate)
-        self._odr_combo.setCurrentText("104 Hz")
+        self._odr_combo.setCurrentText("1666 Hz")
         self._odr_combo.setMinimumWidth(120)
         self._odr_combo.currentIndexChanged.connect(self._on_settings_changed)
         odr_layout.addWidget(self._odr_combo)
@@ -935,7 +935,7 @@ class MainWindow(QMainWindow):
         self._accel_range_combo = QComboBox()
         for accel_range in AccelRange.all_ranges():
             self._accel_range_combo.addItem(accel_range.display_name, accel_range)
-        self._accel_range_combo.setCurrentText("±4g")
+        self._accel_range_combo.setCurrentText("±16g")
         self._accel_range_combo.setMinimumWidth(100)
         self._accel_range_combo.currentIndexChanged.connect(self._on_settings_changed)
         accel_layout.addWidget(self._accel_range_combo)
@@ -1696,6 +1696,7 @@ class MainWindow(QMainWindow):
             output_folder=config.output_folder,
             upload_to_aws=config.upload_to_aws,
             sample_rate=config.sample_rate.value,
+            accel_range=config.accel_range.value,
         )
         
         if not success:

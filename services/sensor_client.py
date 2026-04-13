@@ -64,6 +64,13 @@ class SensorClient:
         r.raise_for_status()
         return r.json()
 
+    def set_accel_range(self, accel_range: int) -> Dict:
+        """Set the accelerometer range in g (2, 4, 8, or 16)."""
+        url = f"{self.base_url}/accel_range?value={accel_range}"
+        r = requests.post(url, timeout=(5, 10))
+        r.raise_for_status()
+        return r.json()
+
     def start_collection(
         self,
         duration: float,

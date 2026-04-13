@@ -53,6 +53,7 @@ class CollectorWorker(QThread):
         output_folder: Path,
         upload_to_aws: bool = True,
         sample_rate: float = 104,
+        accel_range: int = 4,
     ) -> None:
         super().__init__()
         self.hostname = hostname
@@ -61,6 +62,7 @@ class CollectorWorker(QThread):
         self.output_folder = output_folder
         self.upload_to_aws = upload_to_aws
         self.sample_rate = sample_rate
+        self.accel_range = accel_range
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -100,6 +102,13 @@ class CollectorWorker(QThread):
                 client.set_odr(self.sample_rate)
             except Exception as e:
                 # Log but continue - sensor may already be at this rate
+                pass
+
+            # Set accelerometer range
+            try:
+                client.set_accel_range(self.accel_range)
+            except Exception as e:
+                # Log but continue - sensor may already be at this range
                 pass
             
             # Start data collection
@@ -218,16 +227,17 @@ class CollectorService(QObject):
         output_folder: Path,
         upload_to_aws: bool = True,
         sample_rate: float = 104,
+        accel_range: int = 4,
     ) -> bool:
         """
         Start a collection cycle for a sensor.
-        
+
         Returns False if that sensor is already busy.
         """
         if self.is_busy(hostname):
             return False
-        
-        worker = CollectorWorker(hostname, ip, duration, output_folder, upload_to_aws, sample_rate)
+
+        worker = CollectorWorker(hostname, ip, duration, output_folder, upload_to_aws, sample_rate, accel_range)
         worker.status_changed.connect(self._on_status)
         worker.progress_updated.connect(self._on_progress)
         worker.collection_complete.connect(self._on_complete)

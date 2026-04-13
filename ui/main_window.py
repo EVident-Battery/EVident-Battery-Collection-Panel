@@ -207,6 +207,10 @@ QTabWidget::pane {
     top: -1px;
 }
 
+QTabWidget::tab-bar {
+    alignment: left;
+}
+
 QTabBar::tab {
     background-color: #1E293B;
     color: #94A3B8;
@@ -218,6 +222,7 @@ QTabBar::tab {
     margin-right: 4px;
     font-weight: bold;
     font-size: 12px;
+    min-width: 140px;
 }
 
 QTabBar::tab:selected {
@@ -377,6 +382,11 @@ class MainWindow(QMainWindow):
 
         # Tab widget
         self._tab_widget = QTabWidget()
+        # macOS-specific: prevent the native tab bar from eliding/clipping
+        # styled tab labels (e.g. "Data Collection" rendering as "ata Collectio").
+        self._tab_widget.tabBar().setElideMode(Qt.ElideNone)
+        self._tab_widget.tabBar().setUsesScrollButtons(False)
+        self._tab_widget.tabBar().setExpanding(False)
 
         # ---- Tab 1: Data Collection (existing UI) ----
         tab1 = QWidget()

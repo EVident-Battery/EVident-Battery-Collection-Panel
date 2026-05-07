@@ -14,10 +14,11 @@ from __future__ import annotations
 import os
 import sys
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QGuiApplication, QFont
 
+from trial import TRIAL_EXPIRY_DATE, is_expired
 from ui.main_window import MainWindow
 
 
@@ -52,11 +53,21 @@ def main() -> int:
     # Set default font
     font = QFont("Segoe UI", 10)
     app.setFont(font)
-    
+
+    if is_expired():
+        QMessageBox.critical(
+            None,
+            "Trial Expired",
+            f"This trial build expired on {TRIAL_EXPIRY_DATE:%B %d, %Y}.\n\n"
+            "Please contact your vendor for a current build, or build "
+            "from source from our GitHub repository.",
+        )
+        return 0
+
     # Create and show main window
     window = MainWindow()
     window.show()
-    
+
     return app.exec_()
 
 

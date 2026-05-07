@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='AdvancedDeviceHub',
+    name='EVidentBatteryDeviceHubAdvanced_Windows_x86-64',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,10 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-app = BUNDLE(
-    exe,
-    name='AdvancedDeviceHub.app',
-    icon=None,
-    bundle_identifier=None,
+    icon=['media\\favicon_white.ico'],
 )

@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
     QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox,
-    QButtonGroup
+    QButtonGroup, QInputDialog
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
@@ -21,6 +21,7 @@ from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
 from services.manual_resolver import ManualResolverWorker
+from services.settings_store import SensorSettingsStore
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
@@ -349,6 +350,7 @@ class MainWindow(QMainWindow):
         self._discovery = DiscoveryController()
         self._collector = CollectorService()
         self._scheduler = MultiSensorScheduler()
+        self._settings_store = SensorSettingsStore()
 
         # Uptime tracking
         self._start_time = QTime.currentTime()
@@ -1228,8 +1230,9 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Create config
+        # Create config, restoring any settings saved from a previous session
         config = SensorConfig(hostname=hostname, ip=ip, battery=battery)
+        self._settings_store.apply(config)
         self._sensors[hostname] = config
         self._scheduler.register_sensor(config)
 
@@ -1238,6 +1241,7 @@ class MainWindow(QMainWindow):
         card.selected.connect(self._on_sensor_card_selected)
         card.play_clicked.connect(self._on_sensor_play)
         card.pause_clicked.connect(self._on_sensor_pause)
+        card.rename_clicked.connect(self._on_sensor_rename)
 
         self._sensor_cards[hostname] = card
 
@@ -1299,7 +1303,7 @@ class MainWindow(QMainWindow):
         # Load config into settings panel
         config = self._sensors.get(hostname)
         if config:
-            self._selected_label.setText(f"Selected: {config.hostname}")
+            self._selected_label.setText(f"Selected: {config.display_name}")
             self._load_config_to_ui(config)
 
     def _load_config_to_ui(self, config: SensorConfig) -> None:
@@ -1475,6 +1479,8 @@ class MainWindow(QMainWindow):
         config.repetition_count = self._count_spin.value()
         config.stop_at_time = self._stop_time_edit.time()
 
+        self._settings_store.save(config)
+
         # Update card
         if self._selected_hostname in self._sensor_cards:
             self._sensor_cards[self._selected_hostname].refresh()
@@ -1508,6 +1514,10 @@ class MainWindow(QMainWindow):
             config.stop_mode = source_config.stop_mode
             config.repetition_count = source_config.repetition_count
             config.stop_at_time = source_config.stop_at_time
+            # Note: label is deliberately NOT copied - it identifies the
+            # sensor's physical location and is unique per sensor
+
+            self._settings_store.save(config)
 
             # Update card
             if hostname in self._sensor_cards:
@@ -1532,6 +1542,7 @@ class MainWindow(QMainWindow):
             if config:
                 config.output_folder = Path(folder)
                 self._folder_edit.setText(folder)
+                self._settings_store.save(config)
                 self._log_widget.info(f"Output folder set for {self._selected_hostname}: {folder}")
                 
                 # Update card
@@ -1639,6 +1650,7 @@ class MainWindow(QMainWindow):
             battery=battery,
             discovery_source=DiscoverySource.MANUAL
         )
+        self._settings_store.apply(config)
         self._sensors[hostname] = config
         self._manual_sensors[hostname] = config
         self._scheduler.register_sensor(config)
@@ -1648,6 +1660,7 @@ class MainWindow(QMainWindow):
         card.selected.connect(self._on_sensor_card_selected)
         card.play_clicked.connect(self._on_sensor_play)
         card.pause_clicked.connect(self._on_sensor_pause)
+        card.rename_clicked.connect(self._on_sensor_rename)
 
         self._sensor_cards[hostname] = card
 
@@ -1725,6 +1738,35 @@ class MainWindow(QMainWindow):
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
             self._update_global_buttons()
+
+    @pyqtSlot(str)
+    def _on_sensor_rename(self, hostname: str) -> None:
+        """Handle rename (pencil) click on a sensor card."""
+        config = self._sensors.get(hostname)
+        if not config:
+            return
+
+        label, ok = QInputDialog.getText(
+            self,
+            "Rename Sensor",
+            f"Label for {hostname} (leave empty to clear):",
+            text=config.label,
+        )
+        if not ok:
+            return
+
+        config.label = label.strip()
+        self._settings_store.save(config)
+
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].refresh()
+        if hostname == self._selected_hostname:
+            self._selected_label.setText(f"Selected: {config.display_name}")
+
+        if config.label:
+            self._log_widget.info(f"Renamed {hostname} to \"{config.label}\"")
+        else:
+            self._log_widget.info(f"Cleared label for {hostname}")
 
     @pyqtSlot(str)
     def _on_sensor_pause(self, hostname: str) -> None:

@@ -31,6 +31,7 @@ class SensorCardWidget(QFrame):
     selected = pyqtSignal(str)  # hostname
     play_clicked = pyqtSignal(str)  # hostname
     pause_clicked = pyqtSignal(str)  # hostname
+    rename_clicked = pyqtSignal(str)  # hostname
     
     def __init__(self, config: SensorConfig, show_controls: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -52,11 +53,33 @@ class SensorCardWidget(QFrame):
         top_row = QHBoxLayout()
         top_row.setSpacing(8)
         
-        self._hostname_label = QLabel(self.config.hostname)
+        self._hostname_label = QLabel(self.config.display_name)
         self._hostname_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
         self._hostname_label.setStyleSheet("color: #F1F5F9;")
         top_row.addWidget(self._hostname_label)
-        
+
+        if self._show_controls:
+            self._rename_btn = QPushButton("✎")
+            self._rename_btn.setFixedSize(20, 20)
+            self._rename_btn.setToolTip("Rename sensor")
+            self._rename_btn.setCursor(Qt.PointingHandCursor)
+            self._rename_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #64748B;
+                    border: none;
+                    font-size: 12px;
+                    padding: 0;
+                }
+                QPushButton:hover {
+                    color: #F1F5F9;
+                }
+            """)
+            self._rename_btn.clicked.connect(self._on_rename)
+            top_row.addWidget(self._rename_btn)
+        else:
+            self._rename_btn = None
+
         top_row.addStretch()
         
         self._battery_label = QLabel()
@@ -179,6 +202,13 @@ class SensorCardWidget(QFrame):
     
     def _update_style(self) -> None:
         """Update card style based on selection state."""
+        # Labels inherit the app-wide QWidget background (#0F172A) unless made
+        # transparent, which shows as dark boxes on the lighter card
+        label_fix = """
+            QFrame#sensorCard QLabel {
+                background: transparent;
+            }
+        """
         if self._is_selected:
             self.setStyleSheet("""
                 QFrame#sensorCard {
@@ -186,7 +216,7 @@ class SensorCardWidget(QFrame):
                     border: 2px solid #3B82F6;
                     border-radius: 8px;
                 }
-            """)
+            """ + label_fix)
         else:
             self.setStyleSheet("""
                 QFrame#sensorCard {
@@ -198,7 +228,7 @@ class SensorCardWidget(QFrame):
                     background-color: #293548;
                     border-color: #475569;
                 }
-            """)
+            """ + label_fix)
     
     def _update_battery_display(self) -> None:
         """Update battery label with icon and color."""
@@ -221,6 +251,11 @@ class SensorCardWidget(QFrame):
     
     def _update_display(self) -> None:
         """Update all display elements from config."""
+        self._hostname_label.setText(self.config.display_name)
+        # When a label is set, keep the real hostname reachable via tooltip
+        self._hostname_label.setToolTip(
+            self.config.hostname if self.config.label else ""
+        )
         self._update_battery_display()
 
         # Manual badge visibility
@@ -304,4 +339,8 @@ class SensorCardWidget(QFrame):
     def _on_pause(self) -> None:
         """Handle pause button click."""
         self.pause_clicked.emit(self.config.hostname)
+
+    def _on_rename(self) -> None:
+        """Handle rename (pencil) button click."""
+        self.rename_clicked.emit(self.config.hostname)
 

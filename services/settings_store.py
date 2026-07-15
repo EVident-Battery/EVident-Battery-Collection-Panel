@@ -72,6 +72,7 @@ class SensorSettingsStore:
             config.stop_mode = StopMode(entry.get("stop_mode", config.stop_mode.value))
             config.repetition_count = int(entry.get("repetition_count", config.repetition_count))
             config.stop_at_time = self._parse_time(entry.get("stop_at_time"))
+            config.should_be_running = bool(entry.get("should_be_running", False))
         except Exception:
             # A corrupt entry falls back to whatever was applied before it
             pass
@@ -92,6 +93,7 @@ class SensorSettingsStore:
             "stop_mode": config.stop_mode.value,
             "repetition_count": config.repetition_count,
             "stop_at_time": self._format_time(config.stop_at_time),
+            "should_be_running": config.should_be_running,
         }
         self._write()
 

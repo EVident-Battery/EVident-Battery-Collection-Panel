@@ -1252,6 +1252,18 @@ class MainWindow(QMainWindow):
         else:
             self._log_widget.success(f"Discovered: {hostname} ({ip})")
 
+        # Auto-resume: the sensor was running when it dropped off the
+        # network (or the app closed) and was never explicitly stopped
+        if config.should_be_running and config.is_configured:
+            if self._scheduler.start_sensor(
+                hostname, run_immediately=True, ignore_start_mode=True
+            ):
+                self._log_widget.success(
+                    f"Auto-resumed automation for {config.display_name}"
+                )
+                card.refresh()
+                self._update_global_buttons()
+
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
         self._streaming_tab.update_sensors(self._sensors)
@@ -1262,7 +1274,8 @@ class MainWindow(QMainWindow):
         """Handle lost sensor."""
         if hostname not in self._sensors:
             return
-        
+
+        will_resume = self._sensors[hostname].should_be_running
         self._scheduler.unregister_sensor(hostname)
         del self._sensors[hostname]
         
@@ -1276,7 +1289,14 @@ class MainWindow(QMainWindow):
             self._selected_label.setText("No sensor selected")
             self._set_settings_enabled(False)
         
-        self._log_widget.warning(f"Sensor disconnected: {hostname}")
+        if will_resume:
+            self._log_widget.warning(
+                f"Sensor disconnected: {hostname}"
+                " - automation will resume automatically if it reappears"
+            )
+        else:
+            self._log_widget.warning(f"Sensor disconnected: {hostname}")
+        self._update_global_buttons()
 
         # Update monitoring tab sensor list
         self._monitoring_tab.update_sensors(self._sensors)
@@ -1728,6 +1748,8 @@ class MainWindow(QMainWindow):
             return
 
         if self._scheduler.start_sensor(hostname, run_immediately=True):
+            config.should_be_running = True
+            self._settings_store.save(config)
             if config.start_mode == StartMode.AT_TIME and config.start_at_time:
                 self._log_widget.success(
                     f"Scheduled {hostname} to start at {config.start_at_time.toString('h:mm AP')}"
@@ -1771,6 +1793,10 @@ class MainWindow(QMainWindow):
     def _on_sensor_pause(self, hostname: str) -> None:
         """Handle pause button on sensor card."""
         self._scheduler.stop_sensor(hostname)
+        config = self._sensors.get(hostname)
+        if config:
+            config.should_be_running = False
+            self._settings_store.save(config)
         self._log_widget.warning(f"Stopped automation for {hostname}")
         
         if hostname in self._sensor_cards:
@@ -1796,6 +1822,10 @@ class MainWindow(QMainWindow):
 
         count = self._scheduler.start_all(run_immediately=True)
         if count > 0:
+            for config in self._sensors.values():
+                if config.is_running and not config.should_be_running:
+                    config.should_be_running = True
+                    self._settings_store.save(config)
             self._log_widget.success(f"Started automation for {count} sensor(s)")
             for card in self._sensor_cards.values():
                 card.refresh()
@@ -1807,6 +1837,10 @@ class MainWindow(QMainWindow):
     def _on_stop_all_clicked(self) -> None:
         """Stop all sensors."""
         self._scheduler.stop_all()
+        for config in self._sensors.values():
+            if config.should_be_running:
+                config.should_be_running = False
+                self._settings_store.save(config)
         self._log_widget.warning("Stopped all sensors")
         for card in self._sensor_cards.values():
             card.refresh()
@@ -1920,7 +1954,14 @@ class MainWindow(QMainWindow):
             
             # Notify scheduler
             self._scheduler.notify_collection_complete(hostname)
-            
+
+            # If the stop mode just ended the schedule (after N runs /
+            # at time), that's a legitimate stop - clear the resume intent
+            if not config.is_running and config.should_be_running:
+                config.should_be_running = False
+                self._settings_store.save(config)
+                self._update_global_buttons()
+
             # Update card
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].set_progress(0)

@@ -53,14 +53,21 @@ class MultiSensorScheduler(QObject):
         """Get sensor config by hostname."""
         return self._sensors.get(hostname)
     
-    def start_sensor(self, hostname: str, run_immediately: bool = True) -> bool:
+    def start_sensor(
+        self,
+        hostname: str,
+        run_immediately: bool = True,
+        ignore_start_mode: bool = False,
+    ) -> bool:
         """
         Start scheduling for a sensor.
-        
+
         Args:
             hostname: Sensor to start
             run_immediately: If True, trigger collection immediately
-            
+            ignore_start_mode: Skip any "start at time" deferral - used when
+                resuming a schedule that was already past its start time
+
         Returns:
             True if started successfully
         """
@@ -72,7 +79,11 @@ class MultiSensorScheduler(QObject):
         config.status = SensorStatus.WAITING
         config.reset_repetitions()
 
-        if config.start_mode == StartMode.AT_TIME and config.start_at_time is not None:
+        if (
+            not ignore_start_mode
+            and config.start_mode == StartMode.AT_TIME
+            and config.start_at_time is not None
+        ):
             # Defer first collection: count down to the configured start time
             config.countdown_seconds = config.seconds_until_start()
         elif run_immediately:

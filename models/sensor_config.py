@@ -168,6 +168,11 @@ class SensorConfig:
     status: SensorStatus = SensorStatus.IDLE
     is_running: bool = False
     countdown_seconds: int = 0
+
+    # Persisted intent: True while the user has started this sensor and
+    # nothing has legitimately stopped it (pause, Stop All, stop mode).
+    # Survives mDNS drops and app restarts so automation can auto-resume.
+    should_be_running: bool = False
     
     # Statistics
     stats: SensorStats = field(default_factory=SensorStats)

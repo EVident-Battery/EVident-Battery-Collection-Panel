@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
-from models.sensor_config import SensorConfig, SensorStatus
+from models.sensor_config import SensorConfig, SensorStatus, StartMode
 
 
 class MultiSensorScheduler(QObject):
@@ -71,8 +71,11 @@ class MultiSensorScheduler(QObject):
         config.is_running = True
         config.status = SensorStatus.WAITING
         config.reset_repetitions()
-        
-        if run_immediately:
+
+        if config.start_mode == StartMode.AT_TIME and config.start_at_time is not None:
+            # Defer first collection: count down to the configured start time
+            config.countdown_seconds = config.seconds_until_start()
+        elif run_immediately:
             # Trigger immediately, countdown starts after collection
             self._trigger_sensor(hostname)
         else:

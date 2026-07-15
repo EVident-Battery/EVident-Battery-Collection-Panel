@@ -9,13 +9,14 @@ from PyQt5.QtWidgets import (
     QPushButton, QSpinBox, QComboBox, QLineEdit, QFileDialog,
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
-    QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox
+    QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox,
+    QButtonGroup
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StopMode, DiscoverySource
+from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StartMode, StopMode, DiscoverySource
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
@@ -821,7 +822,7 @@ class MainWindow(QMainWindow):
         settings_grid.setColumnMinimumWidth(0, 100)
         settings_grid.setColumnMinimumWidth(1, 200)
         # Set minimum row heights to prevent vertical overlap
-        for i in range(7):
+        for i in range(8):
             settings_grid.setRowMinimumHeight(i, 32)
         
         row = 0
@@ -871,21 +872,64 @@ class MainWindow(QMainWindow):
 
         row += 1
 
-        # Stop Mode section (right after Interval)
+        # Start Mode section (right after Interval)
+        settings_grid.addWidget(QLabel("Start Mode:"), row, 0, Qt.AlignTop)
+        start_mode_layout = QVBoxLayout()
+        start_mode_layout.setSpacing(6)
+
+        # Own button group so these don't join the Stop Mode radios'
+        # exclusivity group (radios sharing a parent are exclusive by default)
+        self._start_mode_group = QButtonGroup(self)
+
+        # Option 1: Immediate
+        self._start_immediate_radio = QRadioButton("Immediate")
+        self._start_immediate_radio.setChecked(True)
+        self._start_immediate_radio.toggled.connect(self._on_start_mode_changed)
+        self._start_mode_group.addButton(self._start_immediate_radio)
+        start_mode_layout.addWidget(self._start_immediate_radio)
+
+        # Option 2: At specific time
+        start_time_layout = QHBoxLayout()
+        self._start_time_radio = QRadioButton("At")
+        self._start_time_radio.toggled.connect(self._on_start_mode_changed)
+        self._start_mode_group.addButton(self._start_time_radio)
+        start_time_layout.addWidget(self._start_time_radio)
+
+        self._start_time_edit = QTimeEdit()
+        self._start_time_edit.setDisplayFormat("hh:mm AP")
+        self._start_time_edit.setTime(QTime(8, 0))  # Default 8:00 AM
+        self._start_time_edit.setStyleSheet("background-color: #1E3A5F; color: #64748B;")
+        self._start_time_edit.timeChanged.connect(self._on_settings_changed)
+        start_time_layout.addWidget(self._start_time_edit)
+        start_time_layout.addStretch()
+        start_mode_layout.addLayout(start_time_layout)
+
+        settings_grid.addLayout(start_mode_layout, row, 1)
+
+        # Initialize start mode controls state
+        self._start_time_edit.setEnabled(False)
+
+        row += 1
+
+        # Stop Mode section
         settings_grid.addWidget(QLabel("Stop Mode:"), row, 0, Qt.AlignTop)
         stop_mode_layout = QVBoxLayout()
         stop_mode_layout.setSpacing(6)
+
+        self._stop_mode_group = QButtonGroup(self)
 
         # Option 1: Continuous
         self._continuous_radio = QRadioButton("Continuous")
         self._continuous_radio.setChecked(True)
         self._continuous_radio.toggled.connect(self._on_stop_mode_changed)
+        self._stop_mode_group.addButton(self._continuous_radio)
         stop_mode_layout.addWidget(self._continuous_radio)
 
         # Option 2: After N runs
         count_layout = QHBoxLayout()
         self._count_radio = QRadioButton("After")
         self._count_radio.toggled.connect(self._on_stop_mode_changed)
+        self._stop_mode_group.addButton(self._count_radio)
         count_layout.addWidget(self._count_radio)
 
         self._count_spin = QSpinBox()
@@ -902,6 +946,7 @@ class MainWindow(QMainWindow):
         time_layout = QHBoxLayout()
         self._time_radio = QRadioButton("At")
         self._time_radio.toggled.connect(self._on_stop_mode_changed)
+        self._stop_mode_group.addButton(self._time_radio)
         time_layout.addWidget(self._time_radio)
 
         self._stop_time_edit = QTimeEdit()
@@ -1265,6 +1310,9 @@ class MainWindow(QMainWindow):
         self._odr_combo.blockSignals(True)
         self._accel_range_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
+        self._start_immediate_radio.blockSignals(True)
+        self._start_time_radio.blockSignals(True)
+        self._start_time_edit.blockSignals(True)
         self._continuous_radio.blockSignals(True)
         self._count_radio.blockSignals(True)
         self._time_radio.blockSignals(True)
@@ -1277,6 +1325,15 @@ class MainWindow(QMainWindow):
         self._odr_combo.setCurrentText(config.sample_rate.display_name)
         self._accel_range_combo.setCurrentText(config.accel_range.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
+
+        # Load start mode
+        if config.start_mode == StartMode.IMMEDIATE:
+            self._start_immediate_radio.setChecked(True)
+        elif config.start_mode == StartMode.AT_TIME:
+            self._start_time_radio.setChecked(True)
+
+        if config.start_at_time:
+            self._start_time_edit.setTime(config.start_at_time)
 
         # Load stop mode
         if config.stop_mode == StopMode.CONTINUOUS:
@@ -1305,13 +1362,17 @@ class MainWindow(QMainWindow):
         self._odr_combo.blockSignals(False)
         self._accel_range_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
+        self._start_immediate_radio.blockSignals(False)
+        self._start_time_radio.blockSignals(False)
+        self._start_time_edit.blockSignals(False)
         self._continuous_radio.blockSignals(False)
         self._count_radio.blockSignals(False)
         self._time_radio.blockSignals(False)
         self._count_spin.blockSignals(False)
         self._stop_time_edit.blockSignals(False)
 
-        # Update stop mode control states (no config save)
+        # Update start/stop mode control states (no config save)
+        self._update_start_mode_controls_state()
         self._update_stop_mode_controls_state()
 
     def _update_stats_display(self, config: SensorConfig) -> None:
@@ -1326,6 +1387,21 @@ class MainWindow(QMainWindow):
             uploaded_lbl.setText(str(config.stats.uploaded))
         if errors_lbl:
             errors_lbl.setText(str(config.stats.errors))
+
+    def _update_start_mode_controls_state(self) -> None:
+        """Update enabled/disabled state and styling of start mode sub-controls without saving."""
+        time_enabled = self._start_time_radio.isChecked()
+        self._start_time_edit.setEnabled(time_enabled)
+
+        time_dim_style = "background-color: #1E3A5F; color: #64748B;"
+        time_normal_style = "background-color: #1E3A5F; color: #E2E8F0;"
+        self._start_time_edit.setStyleSheet(time_dim_style if not time_enabled else time_normal_style)
+
+    @pyqtSlot()
+    def _on_start_mode_changed(self) -> None:
+        """Update enabled state of start mode controls and save to config."""
+        self._update_start_mode_controls_state()
+        self._on_settings_changed()
 
     def _update_stop_mode_controls_state(self) -> None:
         """Update enabled/disabled state and styling of stop mode sub-controls without saving."""
@@ -1379,6 +1455,14 @@ class MainWindow(QMainWindow):
         config.accel_range = self._accel_range_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
 
+        # Save start mode
+        if self._start_immediate_radio.isChecked():
+            config.start_mode = StartMode.IMMEDIATE
+        elif self._start_time_radio.isChecked():
+            config.start_mode = StartMode.AT_TIME
+
+        config.start_at_time = self._start_time_edit.time()
+
         # Save stop mode
         if self._continuous_radio.isChecked():
             config.stop_mode = StopMode.CONTINUOUS
@@ -1416,6 +1500,9 @@ class MainWindow(QMainWindow):
             config.accel_range = source_config.accel_range
             config.output_folder = source_config.output_folder
             config.upload_to_aws = source_config.upload_to_aws
+            # Copy start mode settings
+            config.start_mode = source_config.start_mode
+            config.start_at_time = source_config.start_at_time
             # Copy stop mode settings
             config.stop_mode = source_config.stop_mode
             config.repetition_count = source_config.repetition_count
@@ -1628,7 +1715,12 @@ class MainWindow(QMainWindow):
             return
 
         if self._scheduler.start_sensor(hostname, run_immediately=True):
-            self._log_widget.success(f"Started automation for {hostname}")
+            if config.start_mode == StartMode.AT_TIME and config.start_at_time:
+                self._log_widget.success(
+                    f"Scheduled {hostname} to start at {config.start_at_time.toString('h:mm AP')}"
+                )
+            else:
+                self._log_widget.success(f"Started automation for {hostname}")
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
             self._update_global_buttons()

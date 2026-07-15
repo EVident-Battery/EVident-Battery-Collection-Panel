@@ -86,6 +86,12 @@ class AccelRange(Enum):
         return list(AccelRange)
 
 
+class StartMode(Enum):
+    """Start mode options for collection scheduling."""
+    IMMEDIATE = "immediate"
+    AT_TIME = "at_time"
+
+
 class StopMode(Enum):
     """Stop mode options for collection scheduling."""
     CONTINUOUS = "continuous"
@@ -143,6 +149,10 @@ class SensorConfig:
     accel_range: AccelRange = AccelRange.G_16
     output_folder: Optional[Path] = None
     upload_to_aws: bool = False
+
+    # Start mode settings
+    start_mode: StartMode = StartMode.IMMEDIATE
+    start_at_time: Optional[QTime] = None  # Used when start_mode == AT_TIME
 
     # Stop mode settings
     stop_mode: StopMode = StopMode.CONTINUOUS
@@ -210,6 +220,15 @@ class SensorConfig:
         if hours > 0:
             return f"{hours:02d}:{mins:02d}:{secs:02d}"
         return f"{mins:02d}:{secs:02d}"
+
+    def seconds_until_start(self) -> int:
+        """Seconds from now until start_at_time, rolling to tomorrow if already past."""
+        if self.start_at_time is None:
+            return 0
+        delta = QTime.currentTime().secsTo(self.start_at_time)
+        if delta <= 0:
+            delta += 86400
+        return delta
 
     def reset_repetitions(self) -> None:
         """Reset remaining repetitions to the configured count."""

@@ -241,7 +241,10 @@ class CollectorService(QObject):
         worker.status_changed.connect(self._on_status)
         worker.progress_updated.connect(self._on_progress)
         worker.collection_complete.connect(self._on_complete)
-        
+        worker.finished.connect(
+            lambda hn=hostname, w=worker: self._cleanup_worker(hn, w)
+        )
+
         self._workers[hostname] = worker
         worker.start()
         return True
@@ -257,6 +260,17 @@ class CollectorService(QObject):
         for worker in self._workers.values():
             worker.cancel()
 
+    def shutdown(self, timeout_ms: int = 5000) -> None:
+        """Cancel all workers and block until their threads exit.
+
+        Must be called before the application quits; otherwise interpreter
+        teardown can destroy still-running QThreads and abort the process.
+        """
+        self.cancel_all()
+        for worker in list(self._workers.values()):
+            worker.wait(timeout_ms)
+        self._workers.clear()
+
     def _on_status(self, hostname: str, status: CollectionStatus, message: str) -> None:
         """Forward status from worker."""
         self.status_changed.emit(hostname, status, message)
@@ -268,6 +282,13 @@ class CollectorService(QObject):
     def _on_complete(self, hostname: str, result: CollectionResult) -> None:
         """Handle worker completion."""
         self.collection_complete.emit(hostname, result)
-        # Clean up worker
-        if hostname in self._workers:
+
+    def _cleanup_worker(self, hostname: str, worker: CollectorWorker) -> None:
+        """Release a worker only after its thread has fully finished.
+
+        Dropping the last reference while run() is still unwinding destroys
+        a running QThread, which aborts the whole process
+        ("QThread: Destroyed while thread is still running").
+        """
+        if self._workers.get(hostname) is worker:
             del self._workers[hostname]

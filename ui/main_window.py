@@ -1821,6 +1821,7 @@ class MainWindow(QMainWindow):
         """Handle window close."""
         self._uptime_timer.stop()
         self._scheduler.stop_all()
+        self._collector.shutdown()
         self._monitoring_tab.stop_pipeline()
         self._streaming_tab.cleanup()
         self._analysis_tab.cleanup()

@@ -135,6 +135,10 @@ class SensorConfig:
     hostname: str
     ip: str
 
+    # User-assigned display label (e.g. "Hot Water Riser"); hostname stays
+    # the internal key everywhere - the label is display-only
+    label: str = ""
+
     # Discovery source
     discovery_source: DiscoverySource = DiscoverySource.AUTOMATIC
 
@@ -171,6 +175,11 @@ class SensorConfig:
     # Progress tracking (0-100)
     progress: int = 0
     
+    @property
+    def display_name(self) -> str:
+        """Label if set, otherwise hostname."""
+        return self.label if self.label else self.hostname
+
     @property
     def interval_seconds(self) -> int:
         """Get the interval in seconds."""

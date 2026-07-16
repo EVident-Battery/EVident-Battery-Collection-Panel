@@ -264,8 +264,8 @@ class SensorCardWidget(QFrame):
         if not self._show_controls:
             return
 
-        # Countdown
-        if self.config.is_running:
+        # Countdown (suspended sensors have no meaningful countdown)
+        if self.config.is_running and self.config.status != SensorStatus.UNREACHABLE:
             self._countdown_label.setText(f"⏱ {self.config.format_countdown()}")
             self._countdown_label.setStyleSheet("color: #3B82F6;")
         else:
@@ -281,6 +281,7 @@ class SensorCardWidget(QFrame):
             SensorStatus.DOWNLOADING: "#22C55E",
             SensorStatus.UPLOADING: "#F59E0B",
             SensorStatus.ERROR: "#EF4444",
+            SensorStatus.UNREACHABLE: "#F97316",
         }
         color = status_colors.get(status, "#64748B")
         

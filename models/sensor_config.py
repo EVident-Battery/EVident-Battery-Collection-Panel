@@ -113,6 +113,7 @@ class SensorStatus(Enum):
     DOWNLOADING = auto()
     UPLOADING = auto()
     ERROR = auto()
+    UNREACHABLE = auto()  # mDNS gone AND collections failing; schedule suspended
 
 
 @dataclass
@@ -173,6 +174,13 @@ class SensorConfig:
     # nothing has legitimately stopped it (pause, Stop All, stop mode).
     # Survives mDNS drops and app restarts so automation can auto-resume.
     should_be_running: bool = False
+
+    # Reachability probation (runtime only, not persisted).
+    # mdns_lost: the mDNS record expired but the sensor stays in the roster;
+    # collections keep running as the reachability check. Only when mDNS is
+    # lost AND collections fail consecutively is the sensor truly unreachable.
+    mdns_lost: bool = False
+    consecutive_failures: int = 0
     
     # Statistics
     stats: SensorStats = field(default_factory=SensorStats)
@@ -207,6 +215,7 @@ class SensorConfig:
             SensorStatus.DOWNLOADING: "Downloading...",
             SensorStatus.UPLOADING: "Uploading to AWS...",
             SensorStatus.ERROR: "Error",
+            SensorStatus.UNREACHABLE: "Unreachable - retrying...",
         }
         return status_map.get(self.status, "Unknown")
     

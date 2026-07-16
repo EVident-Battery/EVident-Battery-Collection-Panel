@@ -22,6 +22,7 @@ from services.collector import CollectorService, CollectionStatus, CollectionRes
 from services.multi_scheduler import MultiSensorScheduler
 from services.manual_resolver import ManualResolverWorker
 from services.settings_store import SensorSettingsStore
+from services.reachability import ReachabilityMonitor
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
@@ -351,6 +352,7 @@ class MainWindow(QMainWindow):
         self._collector = CollectorService()
         self._scheduler = MultiSensorScheduler()
         self._settings_store = SensorSettingsStore()
+        self._reachability = ReachabilityMonitor()
 
         # Uptime tracking
         self._start_time = QTime.currentTime()
@@ -1203,6 +1205,9 @@ class MainWindow(QMainWindow):
         self._scheduler.trigger_collection.connect(self._on_trigger_collection)
         self._scheduler.countdown_tick.connect(self._on_countdown_tick)
 
+        # Reachability probing (for sensors that are mDNS-lost AND failing)
+        self._reachability.sensor_reachable.connect(self._on_sensor_reachable)
+
     def _start_discovery(self) -> None:
         """Start sensor discovery."""
         self._log_widget.info("Starting sensor discovery...")
@@ -1212,6 +1217,24 @@ class MainWindow(QMainWindow):
     def _on_device_found(self, hostname: str, ip: str) -> None:
         """Handle discovered sensor."""
         if hostname in self._sensors:
+            # Known sensor re-announced: refresh its presence (and IP)
+            config = self._sensors[hostname]
+            was_unreachable = config.status == SensorStatus.UNREACHABLE
+            if config.ip != ip:
+                self._log_widget.info(
+                    f"{config.display_name} reappeared at new IP {ip} (was {config.ip})"
+                )
+                config.ip = ip
+            config.mdns_lost = False
+            config.consecutive_failures = 0
+            self._reachability.stop_probing(hostname)
+            if was_unreachable and config.is_running:
+                self._scheduler.resume_sensor(hostname, run_immediately=True)
+                self._log_widget.success(
+                    f"{config.display_name} re-announced via mDNS - resuming automation"
+                )
+            if hostname in self._sensor_cards:
+                self._sensor_cards[hostname].refresh()
             return
 
         # Notify discovery controller to cancel timeout
@@ -1272,31 +1295,52 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_device_lost(self, hostname: str) -> None:
-        """Handle lost sensor."""
+        """
+        Handle an expired mDNS record.
+
+        mDNS expiry is a weak signal (multicast loss routinely expires
+        records for perfectly reachable sensors), so the sensor stays in
+        the roster on probation: its schedule keeps running and each
+        collection attempt doubles as the reachability check. Only mDNS
+        loss PLUS consecutive collection failures suspends it (see
+        _on_collection_complete).
+        """
+        config = self._sensors.get(hostname)
+        if not config:
+            return
+
+        config.mdns_lost = True
+        if config.is_running:
+            self._log_widget.warning(
+                f"mDNS lost for {config.display_name}"
+                " - keeping it in the roster; collections continue as the reachability check"
+            )
+        else:
+            self._log_widget.warning(
+                f"mDNS lost for {config.display_name} (idle) - keeping it in the roster"
+            )
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].refresh()
+
+    def _remove_sensor(self, hostname: str) -> None:
+        """Fully remove a sensor from the roster (used by Reset)."""
         if hostname not in self._sensors:
             return
 
-        will_resume = self._sensors[hostname].should_be_running
+        self._reachability.stop_probing(hostname)
         self._scheduler.unregister_sensor(hostname)
         del self._sensors[hostname]
-        
+
         card = self._sensor_cards.pop(hostname, None)
         if card:
             self._cards_layout.removeWidget(card)
             card.deleteLater()
-        
+
         if self._selected_hostname == hostname:
             self._selected_hostname = None
             self._selected_label.setText("No sensor selected")
             self._set_settings_enabled(False)
-        
-        if will_resume:
-            self._log_widget.warning(
-                f"Sensor disconnected: {hostname}"
-                " - automation will resume automatically if it reappears"
-            )
-        else:
-            self._log_widget.warning(f"Sensor disconnected: {hostname}")
+
         self._update_global_buttons()
 
         # Update monitoring tab sensor list
@@ -1574,7 +1618,7 @@ class MainWindow(QMainWindow):
         """Refresh sensor discovery."""
         # Clear all sensors (including manual)
         for hostname in list(self._sensors.keys()):
-            self._on_device_lost(hostname)
+            self._remove_sensor(hostname)
 
         # Clear manual sensors tracking
         self._manual_sensors.clear()
@@ -1750,6 +1794,7 @@ class MainWindow(QMainWindow):
 
         if self._scheduler.start_sensor(hostname, run_immediately=True):
             config.should_be_running = True
+            config.consecutive_failures = 0
             self._settings_store.save(config)
             if config.start_mode == StartMode.AT_TIME and config.start_at_time:
                 self._log_widget.success(
@@ -1760,6 +1805,23 @@ class MainWindow(QMainWindow):
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
             self._update_global_buttons()
+
+    @pyqtSlot(str)
+    def _on_sensor_reachable(self, hostname: str) -> None:
+        """A backoff probe reached a suspended sensor - resume its schedule."""
+        config = self._sensors.get(hostname)
+        if not config:
+            return
+
+        config.consecutive_failures = 0
+        if config.is_running and config.status == SensorStatus.UNREACHABLE:
+            self._scheduler.resume_sensor(hostname, run_immediately=True)
+            self._log_widget.success(
+                f"{config.display_name} is reachable again (mDNS still silent)"
+                " - resuming automation"
+            )
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].refresh()
 
     @pyqtSlot(str)
     def _on_sensor_rename(self, hostname: str) -> None:
@@ -1794,9 +1856,11 @@ class MainWindow(QMainWindow):
     def _on_sensor_pause(self, hostname: str) -> None:
         """Handle pause button on sensor card."""
         self._scheduler.stop_sensor(hostname)
+        self._reachability.stop_probing(hostname)
         config = self._sensors.get(hostname)
         if config:
             config.should_be_running = False
+            config.consecutive_failures = 0
             self._settings_store.save(config)
         self._log_widget.warning(f"Stopped automation for {hostname}")
         
@@ -1838,7 +1902,9 @@ class MainWindow(QMainWindow):
     def _on_stop_all_clicked(self) -> None:
         """Stop all sensors."""
         self._scheduler.stop_all()
-        for config in self._sensors.values():
+        for hostname, config in self._sensors.items():
+            self._reachability.stop_probing(hostname)
+            config.consecutive_failures = 0
             if config.should_be_running:
                 config.should_be_running = False
                 self._settings_store.save(config)
@@ -1916,7 +1982,14 @@ class MainWindow(QMainWindow):
                 CollectionStatus.AWS_ERROR: SensorStatus.UPLOADING,
             }
             config.status = status_map.get(status, SensorStatus.IDLE)
-            
+
+            # While recording, the countdown shows time left in the recording;
+            # once the download/upload phase starts, snap any leftover to zero
+            if status == CollectionStatus.COLLECTING:
+                config.countdown_seconds = config.duration
+            elif status in (CollectionStatus.DOWNLOADING, CollectionStatus.UPLOADING):
+                config.countdown_seconds = 0
+
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
 
@@ -1963,6 +2036,27 @@ class MainWindow(QMainWindow):
                 self._settings_store.save(config)
                 self._update_global_buttons()
 
+            # Reachability probation: mDNS loss alone never suspends a
+            # sensor, but mDNS loss corroborated by consecutive collection
+            # failures does - then hand it to the backoff prober.
+            if result.success:
+                config.consecutive_failures = 0
+            else:
+                config.consecutive_failures += 1
+                if (
+                    config.mdns_lost
+                    and config.is_running
+                    and config.consecutive_failures >= 3
+                    and not self._reachability.is_probing(hostname)
+                ):
+                    config.status = SensorStatus.UNREACHABLE
+                    self._reachability.start_probing(hostname, config.ip)
+                    self._log_widget.warning(
+                        f"{config.display_name} is unreachable"
+                        f" ({config.consecutive_failures} failed attempts after mDNS loss)"
+                        " - suspending schedule, probing with backoff up to 5 min"
+                    )
+
             # Update card
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].set_progress(0)
@@ -1996,6 +2090,7 @@ class MainWindow(QMainWindow):
         """Handle window close."""
         self._uptime_timer.stop()
         self._scheduler.stop_all()
+        self._reachability.shutdown()
         self._collector.shutdown()
         self._monitoring_tab.stop_pipeline()
         self._streaming_tab.cleanup()

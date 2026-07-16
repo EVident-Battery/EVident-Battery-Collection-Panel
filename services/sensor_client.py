@@ -71,6 +71,11 @@ class SensorClient:
         r.raise_for_status()
         return r.json()
 
+    @staticmethod
+    def collection_read_timeout(duration: float) -> int:
+        """Seconds to wait for a recording of `duration` before declaring a stall."""
+        return max(45, int(duration * 1.05) + 30)
+
     def start_collection(
         self,
         duration: float,
@@ -89,9 +94,12 @@ class SensorClient:
             Path to the saved file
         """
         url = f"{self.data_url}/start?duration={duration}&format=csv"
-        
-        # Use a longer timeout for collection + download
-        timeout = (10, max(120, duration + 90))
+
+        # The server sends nothing until the recording finishes, so the
+        # read timeout must cover the full recording plus setup/flush
+        # slack - but not much more, so a sensor that dies mid-recording
+        # is detected quickly instead of hanging the cycle.
+        timeout = (10, self.collection_read_timeout(duration))
         
         with requests.get(url, stream=True, timeout=timeout) as r:
             r.raise_for_status()

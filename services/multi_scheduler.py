@@ -96,6 +96,25 @@ class MultiSensorScheduler(QObject):
         self.sensor_started.emit(hostname)
         return True
     
+    def resume_sensor(self, hostname: str, run_immediately: bool = True) -> bool:
+        """
+        Resume a suspended (e.g. unreachable) sensor's schedule.
+
+        Unlike start_sensor this does not reset repetition counters -
+        the schedule continues from where it was suspended.
+        """
+        config = self._sensors.get(hostname)
+        if not config or not config.is_running:
+            return False
+
+        config.status = SensorStatus.WAITING
+        if run_immediately:
+            self._trigger_sensor(hostname)
+        else:
+            config.reset_countdown()
+        self._ensure_timer_running()
+        return True
+
     def stop_sensor(self, hostname: str) -> None:
         """Stop scheduling for a sensor."""
         config = self._sensors.get(hostname)
@@ -174,8 +193,12 @@ class MultiSensorScheduler(QObject):
             if not config.is_running:
                 continue
             
-            # Skip if currently collecting
+            # While collecting, tick the recording countdown for display
+            # only - reaching zero must never trigger a new collection
             if self._collecting.get(hostname, False):
+                if config.countdown_seconds > 0:
+                    config.tick_countdown()
+                    self.countdown_tick.emit(hostname, config.countdown_seconds)
                 continue
             
             # Only count down if waiting

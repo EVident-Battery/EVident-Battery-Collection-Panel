@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 import traceback
 
+import requests
+
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
 from services.sensor_client import SensorClient
@@ -68,6 +70,41 @@ class CollectorWorker(QThread):
     def cancel(self) -> None:
         """Request cancellation of the current operation."""
         self._cancelled = True
+
+    def _diagnose_stall(self, client: SensorClient) -> str:
+        """
+        A collection ran past its window without delivering data.
+
+        Distinguish "sensor died mid-recording" from "sensor alive but
+        stuck/overrunning": probe /status, then /progress. If the sensor is
+        alive, send /stop so its collection state is clean for the next
+        cycle. Returns the error message for this failed cycle.
+        """
+        waited = SensorClient.collection_read_timeout(self.duration)
+        try:
+            client.get_status()
+        except Exception:
+            return (
+                f"No data after {waited}s and sensor is unreachable"
+                " - it likely lost power or Wi-Fi mid-recording"
+            )
+
+        # Alive - what does it think it's doing?
+        try:
+            progress = client.get_progress().get("progress")
+        except Exception:
+            progress = "unknown"
+
+        try:
+            client.stop()
+            reset_note = "sensor reset for next cycle"
+        except Exception:
+            reset_note = "sensor reset failed"
+
+        return (
+            f"No data after {waited}s but sensor is reachable"
+            f" (progress: {progress}) - {reset_note}"
+        )
 
     def run(self) -> None:
         """Execute the collection cycle."""
@@ -132,12 +169,18 @@ class CollectorWorker(QThread):
                     )
                 self.progress_updated.emit(self.hostname, downloaded, total)
             
-            # Perform collection and download
-            file_path = client.start_collection(
-                duration=self.duration,
-                output_path=self.output_folder,
-                on_progress=on_progress,
-            )
+            # Perform collection and download. If the sensor doesn't deliver
+            # within the recording duration plus slack, diagnose instead of
+            # hanging: ask /progress whether it is still working, reset it if
+            # so, and fail the cycle either way so the scheduler retries.
+            try:
+                file_path = client.start_collection(
+                    duration=self.duration,
+                    output_path=self.output_folder,
+                    on_progress=on_progress,
+                )
+            except requests.exceptions.ReadTimeout:
+                raise Exception(self._diagnose_stall(client))
             
             result.file_path = file_path
             result.file_size = file_path.stat().st_size if file_path.exists() else 0

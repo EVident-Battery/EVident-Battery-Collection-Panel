@@ -89,7 +89,10 @@ class MultiSensorScheduler(QObject):
             config.window_anchor = QTime.currentTime()
 
         if config.has_daily_window:
-            # Repeat-daily: window membership decides, even on resume paths
+            # Repeat-daily is a standing window (past occurrences of the
+            # start time count), so being inside it means collect now. A
+            # one-shot "At" start below is an appointment: it always means
+            # the NEXT occurrence - "start now until X" is Immediate+Stop At.
             if config.is_within_window():
                 self._trigger_sensor(hostname)
             else:

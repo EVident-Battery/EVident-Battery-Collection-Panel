@@ -1297,14 +1297,28 @@ class MainWindow(QMainWindow):
             self._log_widget.success(f"Discovered: {hostname} ({ip})")
 
         # Auto-resume: the sensor was running when it dropped off the
-        # network (or the app closed) and was never explicitly stopped
+        # network (or the app closed) and was never explicitly stopped.
+        # If its previous collection is somehow still in flight (e.g.
+        # Reset pressed mid-download), adopt it instead of triggering a
+        # duplicate.
         if config.should_be_running and config.is_configured:
+            adopt = self._collector.is_busy(hostname)
             if self._scheduler.start_sensor(
-                hostname, run_immediately=True, ignore_start_mode=True
+                hostname,
+                run_immediately=True,
+                ignore_start_mode=True,
+                adopt_in_flight=adopt,
             ):
-                self._log_widget.success(
-                    f"Auto-resumed automation for {config.display_name}"
-                )
+                if adopt:
+                    self._adopt_in_flight(hostname, config)
+                    self._log_widget.success(
+                        f"Auto-resumed automation for {config.display_name}"
+                        " - adopting the collection already in progress"
+                    )
+                else:
+                    self._log_widget.success(
+                        f"Auto-resumed automation for {config.display_name}"
+                    )
                 card.refresh()
                 self._update_global_buttons()
 
@@ -1845,19 +1859,7 @@ class MainWindow(QMainWindow):
         if not self._scheduler.start_sensor(hostname, adopt_in_flight=adopt):
             return False
         if adopt:
-            self._scheduler.notify_collection_started(hostname)
-            # Show the adopted cycle's actual phase, not a blanket
-            # "Collecting" - it may already be downloading or uploading
-            phase_map = {
-                CollectionStatus.CONNECTING: SensorStatus.COLLECTING,
-                CollectionStatus.COLLECTING: SensorStatus.COLLECTING,
-                CollectionStatus.DOWNLOADING: SensorStatus.DOWNLOADING,
-                CollectionStatus.UPLOADING: SensorStatus.UPLOADING,
-                CollectionStatus.AWS_ERROR: SensorStatus.UPLOADING,
-            }
-            phase = phase_map.get(self._collector.last_status(hostname))
-            if phase is not None:
-                config.status = phase
+            self._adopt_in_flight(hostname, config)
 
         config.should_be_running = True
         config.consecutive_failures = 0
@@ -1930,6 +1932,28 @@ class MainWindow(QMainWindow):
             self._log_widget.info(f"Renamed {hostname} to \"{config.label}\"")
         else:
             self._log_widget.info(f"Cleared label for {hostname}")
+
+    def _adopt_in_flight(self, hostname: str, config: SensorConfig) -> None:
+        """
+        Mark a still-running collection as the current session's active
+        cycle and show its actual phase, not a blanket "Collecting" - it
+        may already be downloading or uploading.
+        """
+        self._scheduler.notify_collection_started(hostname)
+        phase_map = {
+            CollectionStatus.CONNECTING: SensorStatus.COLLECTING,
+            CollectionStatus.COLLECTING: SensorStatus.COLLECTING,
+            CollectionStatus.DOWNLOADING: SensorStatus.DOWNLOADING,
+            CollectionStatus.UPLOADING: SensorStatus.UPLOADING,
+            CollectionStatus.AWS_ERROR: SensorStatus.UPLOADING,
+        }
+        phase = phase_map.get(self._collector.last_status(hostname))
+        if phase is not None:
+            config.status = phase
+        # Restore the recording countdown for a mid-recording adoption
+        # (a fresh config after Reset starts at 00:00 otherwise)
+        if phase == SensorStatus.COLLECTING:
+            config.countdown_seconds = self._collector.recording_seconds_left(hostname)
 
     def _capture_immediate_start(self, config: SensorConfig) -> None:
         """

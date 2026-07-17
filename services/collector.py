@@ -65,6 +65,7 @@ class CollectorWorker(QThread):
         self.upload_to_aws = upload_to_aws
         self.sample_rate = sample_rate
         self.accel_range = accel_range
+        self.started_at: Optional[datetime] = None
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -109,6 +110,7 @@ class CollectorWorker(QThread):
     def run(self) -> None:
         """Execute the collection cycle."""
         start_time = datetime.now()
+        self.started_at = start_time
         result = CollectionResult(hostname=self.hostname, success=False)
         
         try:
@@ -266,6 +268,14 @@ class CollectorService(QObject):
     def last_status(self, hostname: str) -> Optional[CollectionStatus]:
         """Phase last reported by this sensor's in-flight worker, if any."""
         return self._last_status.get(hostname)
+
+    def recording_seconds_left(self, hostname: str) -> int:
+        """Approximate seconds left in an in-flight worker's recording."""
+        worker = self._workers.get(hostname)
+        if worker is None or not worker.isRunning() or worker.started_at is None:
+            return 0
+        elapsed = (datetime.now() - worker.started_at).total_seconds()
+        return max(0, int(worker.duration - elapsed))
 
     def start_collection(
         self,

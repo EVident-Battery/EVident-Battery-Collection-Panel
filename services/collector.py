@@ -256,11 +256,16 @@ class CollectorService(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._workers: Dict[str, CollectorWorker] = {}
+        self._last_status: Dict[str, CollectionStatus] = {}
 
     def is_busy(self, hostname: str) -> bool:
         """Check if a specific sensor is busy collecting."""
         worker = self._workers.get(hostname)
         return worker is not None and worker.isRunning()
+
+    def last_status(self, hostname: str) -> Optional[CollectionStatus]:
+        """Phase last reported by this sensor's in-flight worker, if any."""
+        return self._last_status.get(hostname)
 
     def start_collection(
         self,
@@ -316,6 +321,7 @@ class CollectorService(QObject):
 
     def _on_status(self, hostname: str, status: CollectionStatus, message: str) -> None:
         """Forward status from worker."""
+        self._last_status[hostname] = status
         self.status_changed.emit(hostname, status, message)
 
     def _on_progress(self, hostname: str, downloaded: int, total: int) -> None:
@@ -335,3 +341,4 @@ class CollectorService(QObject):
         """
         if self._workers.get(hostname) is worker:
             del self._workers[hostname]
+            self._last_status.pop(hostname, None)

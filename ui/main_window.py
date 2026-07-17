@@ -963,11 +963,28 @@ class MainWindow(QMainWindow):
         time_layout.addStretch()
         stop_mode_layout.addLayout(time_layout)
 
+        # Repeat daily (only meaningful with a stop time: the window re-arms
+        # for the next start time instead of ending the schedule)
+        repeat_layout = QHBoxLayout()
+        repeat_layout.addSpacing(22)
+        self._repeat_daily_check = QCheckBox("Repeat daily")
+        self._repeat_daily_check.setToolTip(
+            "When the stop time is reached, wait for the next start time and\n"
+            "run again - e.g. collect 9:00 AM to 5:00 PM every day.\n"
+            "With Start Mode set to Immediate, the moment you press Start\n"
+            "becomes the daily start time."
+        )
+        self._repeat_daily_check.toggled.connect(self._on_stop_mode_changed)
+        repeat_layout.addWidget(self._repeat_daily_check)
+        repeat_layout.addStretch()
+        stop_mode_layout.addLayout(repeat_layout)
+
         settings_grid.addLayout(stop_mode_layout, row, 1)
 
         # Initialize stop mode controls state
         self._count_spin.setEnabled(False)
         self._stop_time_edit.setEnabled(False)
+        self._repeat_daily_check.setEnabled(False)
 
         row += 1
 
@@ -1162,7 +1179,8 @@ class MainWindow(QMainWindow):
         
         layout.addStretch()
         
-        version = QLabel("v1.0.0")
+        from version import get_version
+        version = QLabel(get_version())
         version.setStyleSheet("color: #475569; font-size: 11px;")
         layout.addWidget(version)
         
@@ -1204,6 +1222,7 @@ class MainWindow(QMainWindow):
         # Multi-scheduler
         self._scheduler.trigger_collection.connect(self._on_trigger_collection)
         self._scheduler.countdown_tick.connect(self._on_countdown_tick)
+        self._scheduler.window_rearmed.connect(self._on_window_rearmed)
 
         # Reachability probing (for sensors that are mDNS-lost AND failing)
         self._reachability.sensor_reachable.connect(self._on_sensor_reachable)
@@ -1387,6 +1406,7 @@ class MainWindow(QMainWindow):
         self._time_radio.blockSignals(True)
         self._count_spin.blockSignals(True)
         self._stop_time_edit.blockSignals(True)
+        self._repeat_daily_check.blockSignals(True)
 
         self._duration_spin.setValue(config.duration)
         self._interval_spin.setValue(config.interval_value)
@@ -1415,6 +1435,7 @@ class MainWindow(QMainWindow):
         self._count_spin.setValue(config.repetition_count)
         if config.stop_at_time:
             self._stop_time_edit.setTime(config.stop_at_time)
+        self._repeat_daily_check.setChecked(config.repeat_daily)
 
         if config.output_folder:
             self._folder_edit.setText(str(config.output_folder))
@@ -1439,6 +1460,7 @@ class MainWindow(QMainWindow):
         self._time_radio.blockSignals(False)
         self._count_spin.blockSignals(False)
         self._stop_time_edit.blockSignals(False)
+        self._repeat_daily_check.blockSignals(False)
 
         # Update start/stop mode control states (no config save)
         self._update_start_mode_controls_state()
@@ -1480,6 +1502,7 @@ class MainWindow(QMainWindow):
         # Dim/enable the inputs based on which radio is selected
         self._count_spin.setEnabled(count_enabled)
         self._stop_time_edit.setEnabled(time_enabled)
+        self._repeat_daily_check.setEnabled(time_enabled)
 
         # Style dimmed controls
         dim_style = "color: #64748B;"
@@ -1542,6 +1565,7 @@ class MainWindow(QMainWindow):
 
         config.repetition_count = self._count_spin.value()
         config.stop_at_time = self._stop_time_edit.time()
+        config.repeat_daily = self._repeat_daily_check.isChecked()
 
         self._settings_store.save(config)
 
@@ -1578,6 +1602,7 @@ class MainWindow(QMainWindow):
             config.stop_mode = source_config.stop_mode
             config.repetition_count = source_config.repetition_count
             config.stop_at_time = source_config.stop_at_time
+            config.repeat_daily = source_config.repeat_daily
             # Note: label is deliberately NOT copied - it identifies the
             # sensor's physical location and is unique per sensor
 
@@ -1792,11 +1817,22 @@ class MainWindow(QMainWindow):
         if not self._check_memory_warning([config]):
             return
 
+        self._capture_immediate_start(config)
+
         if self._scheduler.start_sensor(hostname, run_immediately=True):
             config.should_be_running = True
             config.consecutive_failures = 0
             self._settings_store.save(config)
-            if config.start_mode == StartMode.AT_TIME and config.start_at_time:
+            if config.has_daily_window:
+                window = (
+                    f"{config.start_at_time.toString('h:mm AP')}-"
+                    f"{config.stop_at_time.toString('h:mm AP')} daily"
+                )
+                if config.is_within_window():
+                    self._log_widget.success(f"Started automation for {hostname} ({window})")
+                else:
+                    self._log_widget.success(f"Scheduled {hostname} ({window}) - waiting for window")
+            elif config.start_mode == StartMode.AT_TIME and config.start_at_time:
                 self._log_widget.success(
                     f"Scheduled {hostname} to start at {config.start_at_time.toString('h:mm AP')}"
                 )
@@ -1852,6 +1888,43 @@ class MainWindow(QMainWindow):
         else:
             self._log_widget.info(f"Cleared label for {hostname}")
 
+    def _capture_immediate_start(self, config: SensorConfig) -> None:
+        """
+        Repeat daily + Immediate start: the press-Start moment becomes the
+        daily start time, so the window has a defined start to return to
+        tomorrow. Made visible by flipping the Start Mode UI to "At".
+        """
+        if not (
+            config.repeat_daily
+            and config.stop_mode == StopMode.AT_TIME
+            and config.start_mode == StartMode.IMMEDIATE
+        ):
+            return
+
+        config.start_mode = StartMode.AT_TIME
+        config.start_at_time = QTime.currentTime()
+        self._settings_store.save(config)
+        self._log_widget.info(
+            f"{config.display_name}: repeat daily - captured "
+            f"{config.start_at_time.toString('h:mm AP')} as the daily start time"
+        )
+        if config.hostname == self._selected_hostname:
+            self._load_config_to_ui(config)
+
+    @pyqtSlot(str, int)
+    def _on_window_rearmed(self, hostname: str, seconds: int) -> None:
+        """A sensor's daily window ended; it re-armed for the next start."""
+        config = self._sensors.get(hostname)
+        if not config:
+            return
+        hours, mins = divmod(seconds // 60, 60)
+        self._log_widget.info(
+            f"{config.display_name}: daily window ended - next start at "
+            f"{config.start_at_time.toString('h:mm AP')} (in {hours}h {mins:02d}m)"
+        )
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].refresh()
+
     @pyqtSlot(str)
     def _on_sensor_pause(self, hostname: str) -> None:
         """Handle pause button on sensor card."""
@@ -1884,6 +1957,9 @@ class MainWindow(QMainWindow):
         # Check memory warning for all sensors being started
         if not self._check_memory_warning(configs_to_start):
             return
+
+        for config in configs_to_start:
+            self._capture_immediate_start(config)
 
         count = self._scheduler.start_all(run_immediately=True)
         if count > 0:

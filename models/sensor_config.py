@@ -165,6 +165,14 @@ class SensorConfig:
     stop_at_time: Optional[QTime] = None  # Used when stop_mode == AT_TIME
     remaining_repetitions: int = 0   # Runtime tracking for count mode
 
+    # Repeat daily: when the stop time ends the collection window, re-arm
+    # for the next occurrence of the start time instead of stopping for good
+    repeat_daily: bool = False
+
+    # Runtime anchor of the active window's start (start_at_time for
+    # scheduled starts, the actual press-Start moment for immediate ones)
+    window_anchor: Optional[QTime] = None
+
     # Runtime state
     status: SensorStatus = SensorStatus.IDLE
     is_running: bool = False
@@ -257,6 +265,41 @@ class SensorConfig:
         """Reset remaining repetitions to the configured count."""
         self.remaining_repetitions = self.repetition_count
 
+    @staticmethod
+    def _within_window(now: QTime, start: QTime, stop: QTime) -> bool:
+        """True if `now` is inside the [start, stop) window.
+
+        Windows where start > stop wrap past midnight (e.g. 5 PM -> 9 AM).
+        start == stop is deliberately "always inside" (a 24-hour window).
+        """
+        if start == stop:
+            return True
+        if start < stop:
+            return start <= now < stop
+        return now >= start or now < stop
+
+    def is_within_window(self) -> bool:
+        """True if now is inside the active collection window.
+
+        Sensors with no time-bounded stop are always "inside".
+        """
+        if self.stop_mode != StopMode.AT_TIME or self.stop_at_time is None:
+            return True
+        anchor = self.window_anchor or self.start_at_time
+        if anchor is None:
+            return True
+        return self._within_window(QTime.currentTime(), anchor, self.stop_at_time)
+
+    @property
+    def has_daily_window(self) -> bool:
+        """True when repeat-daily windowing governs this sensor's schedule."""
+        return (
+            self.repeat_daily
+            and self.stop_mode == StopMode.AT_TIME
+            and self.start_at_time is not None
+            and self.stop_at_time is not None
+        )
+
     def should_stop_after_collection(self) -> bool:
         """Check if sensor should stop after current collection completes."""
         if self.stop_mode == StopMode.CONTINUOUS:
@@ -265,8 +308,10 @@ class SensorConfig:
             self.remaining_repetitions -= 1
             return self.remaining_repetitions <= 0
         elif self.stop_mode == StopMode.AT_TIME:
-            if self.stop_at_time:
-                return QTime.currentTime() >= self.stop_at_time
+            # Window membership instead of a naive `now >= stop` compare,
+            # which broke overnight windows (start 5 PM, stop 9 AM would
+            # "stop" immediately at 5:01 PM)
+            return not self.is_within_window()
         return False
 
     def calculate_memory_bytes(self) -> int:

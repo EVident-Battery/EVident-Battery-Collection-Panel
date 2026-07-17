@@ -59,6 +59,7 @@ class MultiSensorScheduler(QObject):
         hostname: str,
         run_immediately: bool = True,
         ignore_start_mode: bool = False,
+        adopt_in_flight: bool = False,
     ) -> bool:
         """
         Start scheduling for a sensor.
@@ -68,6 +69,10 @@ class MultiSensorScheduler(QObject):
             run_immediately: If True, trigger collection immediately
             ignore_start_mode: Skip any "start at time" deferral - used when
                 resuming a schedule that was already past its start time
+            adopt_in_flight: A previous session's collection is still
+                finishing; don't trigger anything - the caller marks it as
+                this session's active collection and the schedule continues
+                when it completes
 
         Returns:
             True if started successfully
@@ -88,7 +93,9 @@ class MultiSensorScheduler(QObject):
         else:
             config.window_anchor = QTime.currentTime()
 
-        if config.has_daily_window:
+        if adopt_in_flight:
+            pass  # no trigger, no countdown; caller adopts the running cycle
+        elif config.has_daily_window:
             # Repeat-daily is a standing window (past occurrences of the
             # start time count), so being inside it means collect now. A
             # one-shot "At" start below is an appointment: it always means
@@ -177,9 +184,13 @@ class MultiSensorScheduler(QObject):
     
     def notify_collection_complete(self, hostname: str) -> None:
         """Notify that collection completed - reset countdown."""
+        # Only completions of collections this schedule knows about may
+        # touch the countdown: an orphaned in-flight cycle from a stopped
+        # session must not clobber a deferred start armed after it
+        was_ours = self._collecting.get(hostname, False)
         self._collecting[hostname] = False
         config = self._sensors.get(hostname)
-        if config and config.is_running:
+        if config and config.is_running and was_ours:
             # Check if we should stop based on stop mode
             if config.should_stop_after_collection():
                 if config.has_daily_window:

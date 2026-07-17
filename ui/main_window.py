@@ -1819,30 +1819,72 @@ class MainWindow(QMainWindow):
         if not self._check_memory_warning([config]):
             return
 
-        self._capture_immediate_start(config)
-
-        if self._scheduler.start_sensor(hostname, run_immediately=True):
-            config.should_be_running = True
-            config.consecutive_failures = 0
-            self._settings_store.save(config)
-            if config.has_daily_window:
-                window = (
-                    f"{config.start_at_time.toString('h:mm AP')}-"
-                    f"{config.stop_at_time.toString('h:mm AP')} daily"
-                )
-                if config.is_within_window():
-                    self._log_widget.success(f"Started automation for {hostname} ({window})")
-                else:
-                    self._log_widget.success(f"Scheduled {hostname} ({window}) - waiting for window")
-            elif config.start_mode == StartMode.AT_TIME and config.start_at_time:
-                self._log_widget.success(
-                    f"Scheduled {hostname} to start at {config.start_at_time.toString('h:mm AP')}"
-                )
-            else:
-                self._log_widget.success(f"Started automation for {hostname}")
+        if self._begin_automation(config):
             if hostname in self._sensor_cards:
                 self._sensor_cards[hostname].refresh()
             self._update_global_buttons()
+
+    def _begin_automation(self, config: SensorConfig) -> bool:
+        """
+        Start (or restart) a sensor's automation.
+
+        If the previous session's collection is still finishing, adopt it
+        as this session's active cycle instead of triggering a duplicate -
+        the schedule continues when it completes.
+        """
+        hostname = config.hostname
+        self._capture_immediate_start(config)
+
+        # Would this start defer to a future time rather than run now?
+        would_defer = (
+            config.start_mode == StartMode.AT_TIME
+            and config.start_at_time is not None
+            and not (config.has_daily_window and config.is_within_window())
+        )
+        adopt = self._collector.is_busy(hostname) and not would_defer
+
+        if not self._scheduler.start_sensor(hostname, adopt_in_flight=adopt):
+            return False
+        if adopt:
+            self._scheduler.notify_collection_started(hostname)
+            # Show the adopted cycle's actual phase, not a blanket
+            # "Collecting" - it may already be downloading or uploading
+            phase_map = {
+                CollectionStatus.CONNECTING: SensorStatus.COLLECTING,
+                CollectionStatus.COLLECTING: SensorStatus.COLLECTING,
+                CollectionStatus.DOWNLOADING: SensorStatus.DOWNLOADING,
+                CollectionStatus.UPLOADING: SensorStatus.UPLOADING,
+                CollectionStatus.AWS_ERROR: SensorStatus.UPLOADING,
+            }
+            phase = phase_map.get(self._collector.last_status(hostname))
+            if phase is not None:
+                config.status = phase
+
+        config.should_be_running = True
+        config.consecutive_failures = 0
+        self._settings_store.save(config)
+
+        if adopt:
+            self._log_widget.success(
+                f"Started automation for {hostname}"
+                " - current collection still finishing, schedule continues after it"
+            )
+        elif config.has_daily_window:
+            window = (
+                f"{config.start_at_time.toString('h:mm AP')}-"
+                f"{config.stop_at_time.toString('h:mm AP')} daily"
+            )
+            if config.is_within_window():
+                self._log_widget.success(f"Started automation for {hostname} ({window})")
+            else:
+                self._log_widget.success(f"Scheduled {hostname} ({window}) - waiting for window")
+        elif config.start_mode == StartMode.AT_TIME and config.start_at_time:
+            self._log_widget.success(
+                f"Scheduled {hostname} to start at {config.start_at_time.toString('h:mm AP')}"
+            )
+        else:
+            self._log_widget.success(f"Started automation for {hostname}")
+        return True
 
     @pyqtSlot(str)
     def _on_sensor_reachable(self, hostname: str) -> None:
@@ -1975,15 +2017,8 @@ class MainWindow(QMainWindow):
         if not self._check_memory_warning(configs_to_start):
             return
 
-        for config in configs_to_start:
-            self._capture_immediate_start(config)
-
-        count = self._scheduler.start_all(run_immediately=True)
+        count = sum(1 for config in configs_to_start if self._begin_automation(config))
         if count > 0:
-            for config in self._sensors.values():
-                if config.is_running and not config.should_be_running:
-                    config.should_be_running = True
-                    self._settings_store.save(config)
             self._log_widget.success(f"Started automation for {count} sensor(s)")
             for card in self._sensor_cards.values():
                 card.refresh()

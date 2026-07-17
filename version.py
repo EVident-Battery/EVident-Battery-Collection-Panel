@@ -27,8 +27,10 @@ def get_version() -> str:
         )
         if r.returncode == 0 and r.stdout.strip():
             commit = r.stdout.strip()
+            # Tracked modifications only: untracked files (logs, local
+            # tools) shouldn't brand the build as dirty
             dirty = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--untracked-files=no"],
                 capture_output=True, text=True, cwd=root, timeout=3,
             )
             if dirty.returncode == 0 and dirty.stdout.strip():

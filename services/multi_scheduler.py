@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, QTime, QTimer, pyqtSignal
 
 from models.sensor_config import SensorConfig, SensorStatus, StartMode
 
@@ -26,6 +26,7 @@ class MultiSensorScheduler(QObject):
     countdown_tick = pyqtSignal(str, int)  # hostname, seconds remaining
     sensor_started = pyqtSignal(str)
     sensor_stopped = pyqtSignal(str)
+    window_rearmed = pyqtSignal(str, int)  # hostname, seconds until next start
     
     def __init__(self) -> None:
         super().__init__()
@@ -79,7 +80,21 @@ class MultiSensorScheduler(QObject):
         config.status = SensorStatus.WAITING
         config.reset_repetitions()
 
-        if (
+        # Anchor of the active window: the scheduled start time, or the
+        # actual moment of an immediate start (needed so time-bounded stop
+        # windows that wrap midnight are judged from the right origin)
+        if config.start_mode == StartMode.AT_TIME and config.start_at_time is not None:
+            config.window_anchor = config.start_at_time
+        else:
+            config.window_anchor = QTime.currentTime()
+
+        if config.has_daily_window:
+            # Repeat-daily: window membership decides, even on resume paths
+            if config.is_within_window():
+                self._trigger_sensor(hostname)
+            else:
+                config.countdown_seconds = config.seconds_until_start()
+        elif (
             not ignore_start_mode
             and config.start_mode == StartMode.AT_TIME
             and config.start_at_time is not None
@@ -91,7 +106,7 @@ class MultiSensorScheduler(QObject):
             self._trigger_sensor(hostname)
         else:
             config.reset_countdown()
-        
+
         self._ensure_timer_running()
         self.sensor_started.emit(hostname)
         return True
@@ -108,7 +123,10 @@ class MultiSensorScheduler(QObject):
             return False
 
         config.status = SensorStatus.WAITING
-        if run_immediately:
+        if config.has_daily_window and not config.is_within_window():
+            # Outside the daily window: arm for the next start instead
+            config.countdown_seconds = config.seconds_until_start()
+        elif run_immediately:
             self._trigger_sensor(hostname)
         else:
             config.reset_countdown()
@@ -161,7 +179,10 @@ class MultiSensorScheduler(QObject):
         if config and config.is_running:
             # Check if we should stop based on stop mode
             if config.should_stop_after_collection():
-                self.stop_sensor(hostname)
+                if config.has_daily_window:
+                    self._rearm_for_next_window(hostname, config)
+                else:
+                    self.stop_sensor(hostname)
                 return
 
             config.status = SensorStatus.WAITING
@@ -173,6 +194,12 @@ class MultiSensorScheduler(QObject):
         if config:
             config.status = status
     
+    def _rearm_for_next_window(self, hostname: str, config) -> None:
+        """Daily window ended: wait for the next occurrence of the start time."""
+        config.status = SensorStatus.WAITING
+        config.countdown_seconds = config.seconds_until_start()
+        self.window_rearmed.emit(hostname, config.countdown_seconds)
+
     def _trigger_sensor(self, hostname: str) -> None:
         """Trigger collection for a sensor."""
         if not self._collecting.get(hostname, False):
@@ -205,7 +232,13 @@ class MultiSensorScheduler(QObject):
             if config.status == SensorStatus.WAITING:
                 reached_zero = config.tick_countdown()
                 self.countdown_tick.emit(hostname, config.countdown_seconds)
-                
+
                 if reached_zero:
-                    self._trigger_sensor(hostname)
+                    # A long interval can carry the countdown past the stop
+                    # time; re-arm for the next window instead of triggering
+                    # outside it
+                    if config.has_daily_window and not config.is_within_window():
+                        self._rearm_for_next_window(hostname, config)
+                    else:
+                        self._trigger_sensor(hostname)
 

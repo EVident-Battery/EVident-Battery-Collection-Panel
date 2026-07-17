@@ -355,7 +355,9 @@ class MainWindow(QMainWindow):
         self._reachability = ReachabilityMonitor()
 
         # Uptime tracking
-        self._start_time = QTime.currentTime()
+        # Monotonic clock: QTime is time-of-day only and wraps at 24h
+        self._uptime_clock = QElapsedTimer()
+        self._uptime_clock.start()
         self._uptime_timer = QTimer(self)
         self._uptime_timer.setInterval(1000)
         self._uptime_timer.timeout.connect(self._update_uptime)
@@ -2152,14 +2154,15 @@ class MainWindow(QMainWindow):
 
     def _update_uptime(self) -> None:
         """Update the uptime counter display."""
-        elapsed = self._start_time.secsTo(QTime.currentTime())
-        if elapsed < 0:
-            elapsed += 86400  # Handle midnight rollover
-        
-        hours = elapsed // 3600
-        mins = (elapsed % 3600) // 60
-        secs = elapsed % 60
-        self._uptime_label.setText(f"{hours:02d}:{mins:02d}:{secs:02d}")
+        elapsed = self._uptime_clock.elapsed() // 1000
+        days, rem = divmod(elapsed, 86400)
+        hours, rem = divmod(rem, 3600)
+        mins, secs = divmod(rem, 60)
+
+        if days > 0:
+            self._uptime_label.setText(f"{days}d {hours:02d}:{mins:02d}:{secs:02d}")
+        else:
+            self._uptime_label.setText(f"{hours:02d}:{mins:02d}:{secs:02d}")
 
     def closeEvent(self, event) -> None:
         """Handle window close."""

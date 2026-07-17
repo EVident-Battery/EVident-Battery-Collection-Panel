@@ -114,6 +114,7 @@ class SensorStatus(Enum):
     UPLOADING = auto()
     ERROR = auto()
     UNREACHABLE = auto()  # mDNS gone AND collections failing; schedule suspended
+    STOPPING = auto()  # user stopped, but an in-flight collection is finishing
 
 
 @dataclass
@@ -224,6 +225,7 @@ class SensorConfig:
             SensorStatus.UPLOADING: "Uploading to AWS...",
             SensorStatus.ERROR: "Error",
             SensorStatus.UNREACHABLE: "Unreachable - retrying...",
+            SensorStatus.STOPPING: "Finishing current collection...",
         }
         return status_map.get(self.status, "Unknown")
     

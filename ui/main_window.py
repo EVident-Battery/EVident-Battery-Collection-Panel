@@ -1930,14 +1930,29 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_sensor_pause(self, hostname: str) -> None:
         """Handle pause button on sensor card."""
+        config = self._sensors.get(hostname)
+        in_flight = self._collector.is_busy(hostname)
+        remaining = config.countdown_seconds if config else 0
+
         self._scheduler.stop_sensor(hostname)
         self._reachability.stop_probing(hostname)
-        config = self._sensors.get(hostname)
         if config:
             config.should_be_running = False
             config.consecutive_failures = 0
             self._settings_store.save(config)
-        self._log_widget.warning(f"Stopped automation for {hostname}")
+        if config and in_flight:
+            # Stop only cancels future cycles - the in-flight collection
+            # finishes and saves. Make that visible instead of going idle,
+            # and keep the recording countdown ticking (stop_sensor zeroes it).
+            config.status = SensorStatus.STOPPING
+            config.countdown_seconds = remaining
+            self._scheduler.ensure_ticking()
+            self._log_widget.warning(
+                f"Stopped automation for {hostname}"
+                " - letting the current collection finish"
+            )
+        else:
+            self._log_widget.warning(f"Stopped automation for {hostname}")
         
         if hostname in self._sensor_cards:
             self._sensor_cards[hostname].refresh()
@@ -1979,14 +1994,30 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_stop_all_clicked(self) -> None:
         """Stop all sensors."""
+        in_flight = {
+            hostname: (self._collector.is_busy(hostname), config.countdown_seconds)
+            for hostname, config in self._sensors.items()
+        }
         self._scheduler.stop_all()
+        finishing = 0
         for hostname, config in self._sensors.items():
             self._reachability.stop_probing(hostname)
             config.consecutive_failures = 0
             if config.should_be_running:
                 config.should_be_running = False
                 self._settings_store.save(config)
-        self._log_widget.warning("Stopped all sensors")
+            busy, remaining = in_flight[hostname]
+            if busy:
+                config.status = SensorStatus.STOPPING
+                config.countdown_seconds = remaining
+                finishing += 1
+        if finishing:
+            self._scheduler.ensure_ticking()
+            self._log_widget.warning(
+                f"Stopped all sensors - {finishing} still finishing their current collection"
+            )
+        else:
+            self._log_widget.warning("Stopped all sensors")
         for card in self._sensor_cards.values():
             card.refresh()
         self._update_global_buttons()
@@ -2022,7 +2053,9 @@ class MainWindow(QMainWindow):
         )
         
         if not success:
-            self._log_widget.error(f"{hostname}: Collection already in progress")
+            self._log_widget.warning(
+                f"{hostname}: previous collection still finishing - will retry next cycle"
+            )
             self._scheduler.notify_collection_complete(hostname)
 
     @pyqtSlot(str, int)
@@ -2145,6 +2178,17 @@ class MainWindow(QMainWindow):
                 self._progress_bar.setValue(0)
                 self._update_stats_display(config)
         
+        # A stopped sensor's in-flight collection just finished: leave the
+        # transient STOPPING/worker status and settle at idle, visibly
+        if config and not config.is_running and config.status != SensorStatus.IDLE:
+            config.status = SensorStatus.IDLE
+            if result.success:
+                self._log_widget.info(
+                    f"{config.display_name}: in-flight collection saved - now idle"
+                )
+            if hostname in self._sensor_cards:
+                self._sensor_cards[hostname].refresh()
+
         # Update status only if no other collections running
         any_collecting = any(
             c.status in (SensorStatus.COLLECTING, SensorStatus.DOWNLOADING, SensorStatus.UPLOADING)

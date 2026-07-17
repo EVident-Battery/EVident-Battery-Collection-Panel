@@ -208,20 +208,42 @@ class MultiSensorScheduler(QObject):
         if not self._collecting.get(hostname, False):
             self.trigger_collection.emit(hostname)
     
+    def ensure_ticking(self) -> None:
+        """Public: (re)start the tick timer if any sensor needs ticks.
+
+        Needed after a caller marks a sensor STOPPING - stopping the last
+        running sensor halts the timer before that status can be set.
+        """
+        self._ensure_timer_running()
+
     def _ensure_timer_running(self) -> None:
         """Ensure tick timer is running if any sensor is active."""
         if self._any_running() and not self._tick_timer.isActive():
             self._tick_timer.start()
-    
+
     def _any_running(self) -> bool:
-        """Check if any sensor is running."""
-        return any(c.is_running for c in self._sensors.values())
+        """Check if any sensor is running or finishing an in-flight cycle."""
+        return any(
+            c.is_running or c.status == SensorStatus.STOPPING
+            for c in self._sensors.values()
+        )
     
     def _on_tick(self) -> None:
         """Handle 1-second tick for all running sensors."""
+        any_active = False
         for hostname, config in self._sensors.items():
+            # A stopped sensor finishing its in-flight collection keeps its
+            # recording countdown ticking (display only, never triggers)
+            if config.status == SensorStatus.STOPPING:
+                any_active = True
+                if config.countdown_seconds > 0:
+                    config.tick_countdown()
+                    self.countdown_tick.emit(hostname, config.countdown_seconds)
+                continue
+
             if not config.is_running:
                 continue
+            any_active = True
             
             # While collecting, tick the recording countdown for display
             # only - reaching zero must never trigger a new collection
@@ -244,4 +266,8 @@ class MultiSensorScheduler(QObject):
                         self._rearm_for_next_window(hostname, config)
                     else:
                         self._trigger_sensor(hostname)
+
+        # Tick timer is only needed while something is running or finishing
+        if not any_active:
+            self._tick_timer.stop()
 

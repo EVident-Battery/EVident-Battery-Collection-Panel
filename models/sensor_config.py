@@ -74,16 +74,80 @@ class AccelRange(Enum):
     G_4 = 4
     G_8 = 8
     G_16 = 16
-    
+
     @property
     def display_name(self) -> str:
         """Human-readable name."""
         return f"±{self.value}g"
-    
+
     @staticmethod
     def all_ranges() -> list["AccelRange"]:
         """Return list of all accel ranges."""
         return list(AccelRange)
+
+
+class GyroRange(Enum):
+    """Supported gyroscope range values in dps (EVB-01 only)."""
+    DPS_125 = 125
+    DPS_250 = 250
+    DPS_500 = 500
+    DPS_1000 = 1000
+    DPS_2000 = 2000
+    DPS_4000 = 4000
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable name."""
+        return f"±{self.value} dps"
+
+    @staticmethod
+    def all_ranges() -> list["GyroRange"]:
+        """Return list of all gyro ranges."""
+        return list(GyroRange)
+
+    @staticmethod
+    def from_value(value: float) -> "GyroRange":
+        """Get GyroRange from numeric value."""
+        for r in GyroRange:
+            if r.value == value:
+                return r
+        return GyroRange.DPS_500  # Default
+
+
+class SensorModel(Enum):
+    """
+    Detected sensor hardware model.
+
+    Detected from GET /settings: EVB-Lite reports gyro_range null (no gyro
+    in hardware); EVB-01 reports a numeric range. UNKNOWN (never probed
+    successfully) is treated as full-featured so no options are withheld;
+    an EVB-Lite rejects what it can't do and the cycle fails with a clear
+    error rather than recording silently wrong data.
+    """
+    UNKNOWN = "unknown"
+    EVB_01 = "evb-01"
+    EVB_LITE = "evb-lite"
+
+    @property
+    def display_name(self) -> str:
+        return {
+            SensorModel.UNKNOWN: "unknown model",
+            SensorModel.EVB_01: "EVB-01",
+            SensorModel.EVB_LITE: "EVB-Lite",
+        }[self]
+
+    @property
+    def has_gyro(self) -> bool:
+        return self is not SensorModel.EVB_LITE
+
+    @property
+    def max_sample_rate_hz(self) -> float:
+        return 1666 if self is SensorModel.EVB_LITE else 6666
+
+    @property
+    def locked_accel_range(self) -> Optional[AccelRange]:
+        """EVB-Lite's accelerometer is fixed at ±16 g."""
+        return AccelRange.G_16 if self is SensorModel.EVB_LITE else None
 
 
 class StartMode(Enum):
@@ -153,6 +217,15 @@ class SensorConfig:
     interval_unit: IntervalUnit = IntervalUnit.MINUTES
     sample_rate: SampleRate = SampleRate.HZ_1666
     accel_range: AccelRange = AccelRange.G_16
+
+    # Gyroscope (EVB-01 only). Accel and gyro share the single ODR above -
+    # there is no separate gyro rate. Off by default so existing setups
+    # keep collecting byte-identical data after an upgrade.
+    gyro_enabled: bool = False
+    gyro_range: GyroRange = GyroRange.DPS_500
+
+    # Hardware model, detected by a background /settings probe and persisted
+    model: SensorModel = SensorModel.UNKNOWN
     output_folder: Optional[Path] = None
     upload_to_aws: bool = False
 
@@ -316,9 +389,53 @@ class SensorConfig:
             return not self.is_within_window()
         return False
 
+    def allowed_sample_rates(self) -> list[SampleRate]:
+        """Sample rates this sensor can actually run with the current setup.
+
+        Capped by the detected model (EVB-Lite tops out at 1666 Hz). With
+        gyro enabled, 6666 Hz drops out: accel and gyro share the ODR, and
+        at 6666 Hz the hardware allows only one of them - accel stays on.
+        """
+        rates = [
+            r for r in SampleRate.all_rates()
+            if r.value <= self.model.max_sample_rate_hz
+        ]
+        if self.gyro_enabled:
+            rates = [r for r in rates if r.value != 6666]
+        return rates
+
+    def clamp_to_capabilities(self) -> list[str]:
+        """Clamp settings the detected model cannot honor.
+
+        Returns human-readable notes for each adjustment made (empty when
+        nothing needed clamping) so callers can log what changed.
+        """
+        notes: list[str] = []
+        if self.gyro_enabled and not self.model.has_gyro:
+            self.gyro_enabled = False
+            notes.append("gyro disabled (not available on EVB-Lite)")
+        locked = self.model.locked_accel_range
+        if locked is not None and self.accel_range != locked:
+            notes.append(
+                f"accel range {self.accel_range.display_name} -> "
+                f"{locked.display_name} (fixed on EVB-Lite)"
+            )
+            self.accel_range = locked
+        allowed = self.allowed_sample_rates()
+        if self.sample_rate not in allowed:
+            new_rate = max(allowed, key=lambda r: r.value)
+            notes.append(
+                f"sample rate {self.sample_rate.display_name} -> "
+                f"{new_rate.display_name}"
+            )
+            self.sample_rate = new_rate
+        return notes
+
     def calculate_memory_bytes(self) -> int:
         """Calculate estimated memory usage in bytes."""
-        return int(self.sample_rate.value * self.duration * 7)
+        # Gyro adds three more channels per sample, roughly doubling the size
+        channels = 2 if self.gyro_enabled else 1
+        return int(self.sample_rate.value * self.duration * 7 * channels)
 
     def exceeds_memory_limit(self, limit_bytes: int = 16_777_216) -> bool:
         """Check if config exceeds memory limit (default 16MB)."""

@@ -71,6 +71,22 @@ class SensorClient:
         r.raise_for_status()
         return r.json()
 
+    def set_gyro_range(self, gyro_range: int) -> Dict:
+        """Set the gyroscope range in dps (125-4000). EVB-01 only."""
+        url = f"{self.base_url}/gyro_range?value={gyro_range}"
+        r = requests.post(url, timeout=(5, 10))
+        r.raise_for_status()
+        return r.json()
+
+    def set_collect(self, accel: bool = True, gyro: bool = False) -> Dict:
+        """Select which channels the sensor records (accel is always on)."""
+        accel_arg = "true" if accel else "false"
+        gyro_arg = "true" if gyro else "false"
+        url = f"{self.base_url}/collect?accel={accel_arg}&gyro={gyro_arg}"
+        r = requests.post(url, timeout=(5, 10))
+        r.raise_for_status()
+        return r.json()
+
     @staticmethod
     def collection_read_timeout(duration: float) -> int:
         """Seconds to wait for a recording of `duration` before declaring a stall."""

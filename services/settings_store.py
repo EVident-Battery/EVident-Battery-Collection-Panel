@@ -8,7 +8,8 @@ from typing import Dict, Optional
 from PyQt5.QtCore import QStandardPaths, QTime
 
 from models.sensor_config import (
-    SensorConfig, IntervalUnit, SampleRate, AccelRange, StartMode, StopMode,
+    SensorConfig, IntervalUnit, SampleRate, AccelRange, GyroRange,
+    SensorModel, StartMode, StopMode,
 )
 
 
@@ -63,6 +64,9 @@ class SensorSettingsStore:
             config.interval_unit = IntervalUnit(entry.get("interval_unit", config.interval_unit.value))
             config.sample_rate = SampleRate.from_value(entry.get("sample_rate", config.sample_rate.value))
             config.accel_range = AccelRange(entry.get("accel_range", config.accel_range.value))
+            config.gyro_enabled = bool(entry.get("gyro_enabled", False))
+            config.gyro_range = GyroRange.from_value(entry.get("gyro_range", config.gyro_range.value))
+            config.model = SensorModel(entry.get("model", SensorModel.UNKNOWN.value))
             folder = entry.get("output_folder")
             if folder and Path(folder).is_dir():
                 config.output_folder = Path(folder)
@@ -87,6 +91,9 @@ class SensorSettingsStore:
             "interval_unit": config.interval_unit.value,
             "sample_rate": config.sample_rate.value,
             "accel_range": config.accel_range.value,
+            "gyro_enabled": config.gyro_enabled,
+            "gyro_range": config.gyro_range.value,
+            "model": config.model.value,
             "output_folder": str(config.output_folder) if config.output_folder else None,
             "upload_to_aws": config.upload_to_aws,
             "start_mode": config.start_mode.value,

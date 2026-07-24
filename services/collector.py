@@ -56,6 +56,8 @@ class CollectorWorker(QThread):
         upload_to_aws: bool = True,
         sample_rate: float = 104,
         accel_range: int = 4,
+        gyro_enabled: bool = False,
+        gyro_range: int = 500,
     ) -> None:
         super().__init__()
         self.hostname = hostname
@@ -65,12 +67,75 @@ class CollectorWorker(QThread):
         self.upload_to_aws = upload_to_aws
         self.sample_rate = sample_rate
         self.accel_range = accel_range
+        self.gyro_enabled = gyro_enabled
+        self.gyro_range = gyro_range
         self.started_at: Optional[datetime] = None
         self._cancelled = False
 
     def cancel(self) -> None:
         """Request cancellation of the current operation."""
         self._cancelled = True
+
+    def _apply_setting(self, description: str, apply_fn: Callable[[], Dict]) -> None:
+        """Apply one sensor setting before recording.
+
+        An explicit HTTP rejection fails the cycle: the sensor cannot honor
+        the setting, and recording anyway would produce silently wrong data
+        (e.g. an EVB-Lite left at its old ODR). A transient network error
+        only warns - the sensor may already hold the setting from the last
+        cycle, and a truly dead link fails loudly at /start moments later.
+        """
+        try:
+            apply_fn()
+        except requests.exceptions.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.response.json().get("error", "")
+            except Exception:
+                pass
+            raise Exception(f"Sensor rejected {description}: {detail or e}")
+        except Exception as e:
+            self.status_changed.emit(
+                self.hostname,
+                CollectionStatus.CONNECTING,
+                f"[{self.hostname}] Warning: could not set {description}"
+                f" ({e}) - continuing",
+            )
+
+    def _apply_sensor_config(self, client: SensorClient) -> None:
+        """Push this cycle's settings to the sensor, in a safe order.
+
+        /collect and /odr are ordered so the transition through the sensor's
+        previous state never trips the 6666 Hz accel-XOR-gyro rule: enabling
+        gyro lowers the ODR first; disabling gyro drops the channel before
+        any move up to 6666 Hz.
+        """
+        if self.gyro_enabled:
+            self._apply_setting(
+                f"sample rate {self.sample_rate} Hz",
+                lambda: client.set_odr(self.sample_rate),
+            )
+            self._apply_setting(
+                "channels (accel + gyro)",
+                lambda: client.set_collect(accel=True, gyro=True),
+            )
+            self._apply_setting(
+                f"gyro range {self.gyro_range} dps",
+                lambda: client.set_gyro_range(self.gyro_range),
+            )
+        else:
+            self._apply_setting(
+                "channels (accel only)",
+                lambda: client.set_collect(accel=True, gyro=False),
+            )
+            self._apply_setting(
+                f"sample rate {self.sample_rate} Hz",
+                lambda: client.set_odr(self.sample_rate),
+            )
+        self._apply_setting(
+            f"accel range {self.accel_range}g",
+            lambda: client.set_accel_range(self.accel_range),
+        )
 
     def _diagnose_stall(self, client: SensorClient) -> str:
         """
@@ -136,25 +201,20 @@ class CollectorWorker(QThread):
             if self._cancelled:
                 return
             
-            # Set sample rate (ODR)
-            try:
-                client.set_odr(self.sample_rate)
-            except Exception as e:
-                # Log but continue - sensor may already be at this rate
-                pass
+            # Push rate/range/channel selection; a sensor that rejects a
+            # setting fails the cycle here rather than recording wrong data
+            self._apply_sensor_config(client)
 
-            # Set accelerometer range
-            try:
-                client.set_accel_range(self.accel_range)
-            except Exception as e:
-                # Log but continue - sensor may already be at this range
-                pass
-            
+            if self._cancelled:
+                return
+
             # Start data collection
+            channels = "accel + gyro" if self.gyro_enabled else "accel"
             self.status_changed.emit(
                 self.hostname,
                 CollectionStatus.COLLECTING,
-                f"[{self.hostname}] Collecting for {self.duration:.0f}s @ {self.sample_rate}Hz..."
+                f"[{self.hostname}] Collecting for {self.duration:.0f}s"
+                f" @ {self.sample_rate}Hz ({channels})..."
             )
             
             # Callback for download progress - emit DOWNLOADING status on first progress
@@ -286,6 +346,8 @@ class CollectorService(QObject):
         upload_to_aws: bool = True,
         sample_rate: float = 104,
         accel_range: int = 4,
+        gyro_enabled: bool = False,
+        gyro_range: int = 500,
     ) -> bool:
         """
         Start a collection cycle for a sensor.
@@ -295,7 +357,10 @@ class CollectorService(QObject):
         if self.is_busy(hostname):
             return False
 
-        worker = CollectorWorker(hostname, ip, duration, output_folder, upload_to_aws, sample_rate, accel_range)
+        worker = CollectorWorker(
+            hostname, ip, duration, output_folder, upload_to_aws,
+            sample_rate, accel_range, gyro_enabled, gyro_range,
+        )
         worker.status_changed.connect(self._on_status)
         worker.progress_updated.connect(self._on_progress)
         worker.collection_complete.connect(self._on_complete)

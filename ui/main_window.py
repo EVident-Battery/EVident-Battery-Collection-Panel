@@ -12,17 +12,21 @@ from PyQt5.QtWidgets import (
     QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox,
     QButtonGroup, QInputDialog
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize, QEvent
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
-from models.sensor_config import SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange, StartMode, StopMode, DiscoverySource
+from models.sensor_config import (
+    SensorConfig, SensorStatus, IntervalUnit, SampleRate, AccelRange,
+    GyroRange, SensorModel, StartMode, StopMode, DiscoverySource,
+)
 from services.discovery import DiscoveryController
 from services.collector import CollectorService, CollectionStatus, CollectionResult
 from services.multi_scheduler import MultiSensorScheduler
 from services.manual_resolver import ManualResolverWorker
 from services.settings_store import SensorSettingsStore
 from services.reachability import ReachabilityMonitor
+from services.capabilities import CapabilityDetector
 from ui.sensor_card import SensorCardWidget
 from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
@@ -114,6 +118,16 @@ QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus {
     border-color: #3B82F6;
 }
 
+QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled, QLineEdit:disabled {
+    background-color: #0F172A;
+    color: #475569;
+    border-color: #1E293B;
+}
+
+QComboBox::down-arrow:disabled {
+    border-top-color: #334155;
+}
+
 QComboBox::drop-down {
     border: none;
     padding-right: 8px;
@@ -180,6 +194,15 @@ QCheckBox::indicator {
     border-radius: 4px;
     border: 2px solid #475569;
     background-color: #1E293B;
+}
+
+QCheckBox:disabled, QRadioButton:disabled {
+    color: #475569;
+}
+
+QCheckBox::indicator:disabled {
+    border-color: #1E293B;
+    background-color: #0F172A;
 }
 
 QCheckBox::indicator:checked {
@@ -353,6 +376,7 @@ class MainWindow(QMainWindow):
         self._scheduler = MultiSensorScheduler()
         self._settings_store = SensorSettingsStore()
         self._reachability = ReachabilityMonitor()
+        self._capabilities = CapabilityDetector()
 
         # Uptime tracking
         # Monotonic clock: QTime is time-of-day only and wraps at 24h
@@ -1006,9 +1030,13 @@ class MainWindow(QMainWindow):
 
         row += 1
 
-        # Accel Range (separate row)
+        # Accel Range (separate row). The row lives in a widget container so
+        # clicks on a capability-locked (disabled) control can be caught by
+        # the eventFilter and explained in the log instead of dying silently
         settings_grid.addWidget(QLabel("Accel Range:"), row, 0)
-        accel_layout = QHBoxLayout()
+        self._accel_row_widget = QWidget()
+        accel_layout = QHBoxLayout(self._accel_row_widget)
+        accel_layout.setContentsMargins(0, 0, 0, 0)
         accel_layout.setSpacing(8)
         self._accel_range_combo = QComboBox()
         for accel_range in AccelRange.all_ranges():
@@ -1017,8 +1045,50 @@ class MainWindow(QMainWindow):
         self._accel_range_combo.setMinimumWidth(100)
         self._accel_range_combo.currentIndexChanged.connect(self._on_settings_changed)
         accel_layout.addWidget(self._accel_range_combo)
+        self._accel_lock_hint = QLabel("")
+        self._accel_lock_hint.setStyleSheet(
+            "color: #64748B; font-size: 11px; font-style: italic;"
+        )
+        self._accel_lock_hint.setVisible(False)
+        accel_layout.addWidget(self._accel_lock_hint)
         accel_layout.addStretch()
-        settings_grid.addLayout(accel_layout, row, 1)
+        self._accel_row_widget.installEventFilter(self)
+        settings_grid.addWidget(self._accel_row_widget, row, 1)
+
+        row += 1
+
+        # Gyroscope (EVB-01 only; shares the ODR above with the accel)
+        settings_grid.addWidget(QLabel("Gyroscope:"), row, 0)
+        self._gyro_row_widget = QWidget()
+        gyro_layout = QHBoxLayout(self._gyro_row_widget)
+        gyro_layout.setContentsMargins(0, 0, 0, 0)
+        gyro_layout.setSpacing(8)
+        self._gyro_check = QCheckBox("Enable")
+        self._gyro_check.setToolTip(
+            "Record gyroscope data alongside the accelerometer.\n"
+            "Both share the sample rate above. At 6666 Hz the sensor\n"
+            "can only record one channel, so enabling the gyro caps\n"
+            "the sample rate at 3333 Hz."
+        )
+        self._gyro_check.toggled.connect(self._on_gyro_toggled)
+        gyro_layout.addWidget(self._gyro_check)
+        self._gyro_range_combo = QComboBox()
+        for gyro_range in GyroRange.all_ranges():
+            self._gyro_range_combo.addItem(gyro_range.display_name, gyro_range)
+        self._gyro_range_combo.setCurrentText("±500 dps")
+        self._gyro_range_combo.setMinimumWidth(110)
+        self._gyro_range_combo.setEnabled(False)
+        self._gyro_range_combo.currentIndexChanged.connect(self._on_settings_changed)
+        gyro_layout.addWidget(self._gyro_range_combo)
+        self._gyro_lock_hint = QLabel("")
+        self._gyro_lock_hint.setStyleSheet(
+            "color: #64748B; font-size: 11px; font-style: italic;"
+        )
+        self._gyro_lock_hint.setVisible(False)
+        gyro_layout.addWidget(self._gyro_lock_hint)
+        gyro_layout.addStretch()
+        self._gyro_row_widget.installEventFilter(self)
+        settings_grid.addWidget(self._gyro_row_widget, row, 1)
 
         row += 1
 
@@ -1195,6 +1265,8 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.setEnabled(enabled)
         self._odr_combo.setEnabled(enabled)
         self._accel_range_combo.setEnabled(enabled)
+        self._gyro_check.setEnabled(enabled)
+        self._gyro_range_combo.setEnabled(enabled and self._gyro_check.isChecked())
         self._browse_btn.setEnabled(enabled)
         self._aws_checkbox.setEnabled(enabled)
         self._apply_all_btn.setEnabled(enabled)
@@ -1205,6 +1277,10 @@ class MainWindow(QMainWindow):
         if enabled:
             # Update enabled state based on radio selection (no config save)
             self._update_stop_mode_controls_state()
+            # Re-apply per-model gating (Lite locks range and hides gyro)
+            config = self._sensors.get(self._selected_hostname)
+            if config:
+                self._apply_capability_gating(config)
         else:
             self._count_spin.setEnabled(False)
             self._stop_time_edit.setEnabled(False)
@@ -1229,6 +1305,9 @@ class MainWindow(QMainWindow):
         # Reachability probing (for sensors that are mDNS-lost AND failing)
         self._reachability.sensor_reachable.connect(self._on_sensor_reachable)
 
+        # Hardware model detection (gates gyro/ODR/range options per sensor)
+        self._capabilities.model_detected.connect(self._on_model_detected)
+
     def _start_discovery(self) -> None:
         """Start sensor discovery."""
         self._log_widget.info("Starting sensor discovery...")
@@ -1249,6 +1328,8 @@ class MainWindow(QMainWindow):
             config.mdns_lost = False
             config.consecutive_failures = 0
             self._reachability.stop_probing(hostname)
+            # Re-check the hardware model (cheap, self-healing)
+            self._capabilities.probe(hostname, ip)
             if was_unreachable and config.is_running:
                 self._scheduler.resume_sensor(hostname, run_immediately=True)
                 self._log_widget.success(
@@ -1277,8 +1358,14 @@ class MainWindow(QMainWindow):
         # Create config, restoring any settings saved from a previous session
         config = SensorConfig(hostname=hostname, ip=ip, battery=battery)
         self._settings_store.apply(config)
+        # Restored settings must respect the restored model's hardware
+        for note in config.clamp_to_capabilities():
+            self._log_widget.warning(f"{hostname}: restored setting adjusted - {note}")
         self._sensors[hostname] = config
         self._scheduler.register_sensor(config)
+
+        # Identify the hardware model in the background (gyro / ODR gating)
+        self._capabilities.probe(hostname, ip)
 
         # Create card
         card = SensorCardWidget(config)
@@ -1402,7 +1489,7 @@ class MainWindow(QMainWindow):
         # Load config into settings panel
         config = self._sensors.get(hostname)
         if config:
-            self._selected_label.setText(f"Selected: {config.display_name}")
+            self._update_selected_label(config)
             self._load_config_to_ui(config)
 
     def _load_config_to_ui(self, config: SensorConfig) -> None:
@@ -1413,6 +1500,8 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.blockSignals(True)
         self._odr_combo.blockSignals(True)
         self._accel_range_combo.blockSignals(True)
+        self._gyro_check.blockSignals(True)
+        self._gyro_range_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
         self._start_immediate_radio.blockSignals(True)
         self._start_time_radio.blockSignals(True)
@@ -1427,8 +1516,10 @@ class MainWindow(QMainWindow):
         self._duration_spin.setValue(config.duration)
         self._interval_spin.setValue(config.interval_value)
         self._interval_unit_combo.setCurrentText(config.interval_unit.value)
-        self._odr_combo.setCurrentText(config.sample_rate.display_name)
+        self._refresh_odr_choices(config)
         self._accel_range_combo.setCurrentText(config.accel_range.display_name)
+        self._gyro_check.setChecked(config.gyro_enabled)
+        self._gyro_range_combo.setCurrentText(config.gyro_range.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
 
         # Load start mode
@@ -1467,6 +1558,8 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.blockSignals(False)
         self._odr_combo.blockSignals(False)
         self._accel_range_combo.blockSignals(False)
+        self._gyro_check.blockSignals(False)
+        self._gyro_range_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
         self._start_immediate_radio.blockSignals(False)
         self._start_time_radio.blockSignals(False)
@@ -1482,6 +1575,10 @@ class MainWindow(QMainWindow):
         self._update_start_mode_controls_state()
         self._update_stop_mode_controls_state()
 
+        # Gate options by the detected hardware model
+        self._apply_capability_gating(config)
+        self._update_selected_label(config)
+
     def _update_stats_display(self, config: SensorConfig) -> None:
         """Update statistics display for a sensor."""
         collections_lbl = self._stats_collections.findChild(QLabel, "stat_collections")
@@ -1494,6 +1591,120 @@ class MainWindow(QMainWindow):
             uploaded_lbl.setText(str(config.stats.uploaded))
         if errors_lbl:
             errors_lbl.setText(str(config.stats.errors))
+
+    def _refresh_odr_choices(self, config: SensorConfig) -> None:
+        """Rebuild the ODR list from the sensor's model + gyro selection.
+
+        Caller must have already clamped config.sample_rate to an allowed
+        value (clamp_to_capabilities), so the current selection always
+        exists in the rebuilt list.
+        """
+        self._odr_combo.blockSignals(True)
+        self._odr_combo.clear()
+        for rate in config.allowed_sample_rates():
+            self._odr_combo.addItem(rate.display_name, rate)
+        self._odr_combo.setCurrentText(config.sample_rate.display_name)
+        self._odr_combo.blockSignals(False)
+
+    def _apply_capability_gating(self, config: SensorConfig) -> None:
+        """Enable/disable controls the detected model can't honor.
+
+        A locked control is dimmed AND explained: an inline hint says why,
+        and clicking the dead row logs the reason (see eventFilter).
+        """
+        gyro_ok = config.model.has_gyro
+        self._gyro_check.setEnabled(gyro_ok)
+        self._gyro_range_combo.setEnabled(gyro_ok and self._gyro_check.isChecked())
+        self._gyro_lock_hint.setText("not available on EVB-Lite")
+        self._gyro_lock_hint.setVisible(not gyro_ok)
+        if not gyro_ok:
+            self._gyro_check.setToolTip("EVB-Lite has no gyroscope")
+            self._gyro_range_combo.setToolTip("EVB-Lite has no gyroscope")
+        else:
+            self._gyro_check.setToolTip(
+                "Record gyroscope data alongside the accelerometer.\n"
+                "Both share the sample rate above. At 6666 Hz the sensor\n"
+                "can only record one channel, so enabling the gyro caps\n"
+                "the sample rate at 3333 Hz."
+            )
+            self._gyro_range_combo.setToolTip("")
+
+        locked = config.model.locked_accel_range
+        self._accel_range_combo.setEnabled(locked is None)
+        self._accel_range_combo.setToolTip(
+            f"EVB-Lite is fixed at {locked.display_name}" if locked else ""
+        )
+        if locked:
+            self._accel_lock_hint.setText(f"fixed at {locked.display_name} on EVB-Lite")
+        self._accel_lock_hint.setVisible(locked is not None)
+
+    def _update_selected_label(self, config: SensorConfig) -> None:
+        """Show the selection with its detected hardware model."""
+        text = f"Selected: {config.display_name}"
+        if config.model is not SensorModel.UNKNOWN:
+            text += f"   ({config.model.display_name})"
+        self._selected_label.setText(text)
+
+    def eventFilter(self, obj, event):
+        """Explain clicks on capability-locked rows instead of silence."""
+        if event.type() == QEvent.MouseButtonPress:
+            if obj is self._gyro_row_widget and not self._gyro_check.isEnabled():
+                self._explain_locked_control(
+                    "has no gyroscope, so gyro recording can't be enabled"
+                )
+            elif (
+                obj is self._accel_row_widget
+                and not self._accel_range_combo.isEnabled()
+            ):
+                self._explain_locked_control(
+                    "has a fixed ±16g accel range - it can't be changed"
+                )
+        return super().eventFilter(obj, event)
+
+    def _explain_locked_control(self, reason: str) -> None:
+        """Log why the clicked control is locked for the selected sensor."""
+        if not self._selected_hostname:
+            return  # row is only dead because no sensor is selected
+        config = self._sensors.get(self._selected_hostname)
+        if not config or config.model is not SensorModel.EVB_LITE:
+            return
+        self._log_widget.info(f"{config.display_name} is an EVB-Lite - it {reason}")
+
+    @pyqtSlot(bool)
+    def _on_gyro_toggled(self, checked: bool) -> None:
+        """Gyro checkbox changed: update config, re-gate the ODR list."""
+        self._gyro_range_combo.setEnabled(checked and self._gyro_check.isEnabled())
+
+        if not self._selected_hostname:
+            return
+        config = self._sensors.get(self._selected_hostname)
+        if not config:
+            return
+
+        config.gyro_enabled = checked
+        # Enabling gyro at 6666 Hz bumps the rate down (accel XOR gyro there)
+        for note in config.clamp_to_capabilities():
+            self._log_widget.warning(f"{config.display_name}: {note}")
+        self._refresh_odr_choices(config)
+        self._on_settings_changed()
+
+    @pyqtSlot(str, object)
+    def _on_model_detected(self, hostname: str, model: SensorModel) -> None:
+        """Background /settings probe identified a sensor's hardware model."""
+        config = self._sensors.get(hostname)
+        if not config or config.model is model:
+            return
+
+        config.model = model
+        self._log_widget.info(f"{config.display_name} identified as {model.display_name}")
+        for note in config.clamp_to_capabilities():
+            self._log_widget.warning(f"{config.display_name}: setting adjusted - {note}")
+        self._settings_store.save(config)
+
+        if self._selected_hostname == hostname:
+            self._load_config_to_ui(config)
+        if hostname in self._sensor_cards:
+            self._sensor_cards[hostname].refresh()
 
     def _update_start_mode_controls_state(self) -> None:
         """Update enabled/disabled state and styling of start mode sub-controls without saving."""
@@ -1561,6 +1772,8 @@ class MainWindow(QMainWindow):
         config.interval_unit = IntervalUnit(self._interval_unit_combo.currentText())
         config.sample_rate = self._odr_combo.currentData()
         config.accel_range = self._accel_range_combo.currentData()
+        config.gyro_enabled = self._gyro_check.isChecked()
+        config.gyro_range = self._gyro_range_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
 
         # Save start mode
@@ -1609,6 +1822,8 @@ class MainWindow(QMainWindow):
             config.interval_unit = source_config.interval_unit
             config.sample_rate = source_config.sample_rate
             config.accel_range = source_config.accel_range
+            config.gyro_enabled = source_config.gyro_enabled
+            config.gyro_range = source_config.gyro_range
             config.output_folder = source_config.output_folder
             config.upload_to_aws = source_config.upload_to_aws
             # Copy start mode settings
@@ -1621,6 +1836,11 @@ class MainWindow(QMainWindow):
             config.repeat_daily = source_config.repeat_daily
             # Note: label is deliberately NOT copied - it identifies the
             # sensor's physical location and is unique per sensor
+
+            # A copied config may exceed this sensor's hardware (e.g. an
+            # EVB-Lite receiving gyro-on at 3333 Hz) - clamp per target
+            for note in config.clamp_to_capabilities():
+                self._log_widget.warning(f"{config.display_name}: adjusted - {note}")
 
             self._settings_store.save(config)
 
@@ -1756,9 +1976,15 @@ class MainWindow(QMainWindow):
             discovery_source=DiscoverySource.MANUAL
         )
         self._settings_store.apply(config)
+        # Restored settings must respect the restored model's hardware
+        for note in config.clamp_to_capabilities():
+            self._log_widget.warning(f"{hostname}: restored setting adjusted - {note}")
         self._sensors[hostname] = config
         self._manual_sensors[hostname] = config
         self._scheduler.register_sensor(config)
+
+        # Identify the hardware model in the background (gyro / ODR gating)
+        self._capabilities.probe(hostname, ip)
 
         # Create card
         card = SensorCardWidget(config)
@@ -1806,7 +2032,8 @@ class MainWindow(QMainWindow):
 
         sensor_list = "\n".join([
             f"  - {c.hostname}: {c.format_memory_size()} "
-            f"({c.sample_rate.display_name} x {c.duration}s)"
+            f"({c.sample_rate.display_name} x {c.duration}s"
+            f"{' + gyro' if c.gyro_enabled else ''})"
             for c in exceeding
         ])
         reply = QMessageBox.warning(
@@ -2109,6 +2336,8 @@ class MainWindow(QMainWindow):
             upload_to_aws=config.upload_to_aws,
             sample_rate=config.sample_rate.value,
             accel_range=config.accel_range.value,
+            gyro_enabled=config.gyro_enabled,
+            gyro_range=config.gyro_range.value,
         )
         
         if not success:
@@ -2273,6 +2502,7 @@ class MainWindow(QMainWindow):
         self._uptime_timer.stop()
         self._scheduler.stop_all()
         self._reachability.shutdown()
+        self._capabilities.shutdown()
         self._collector.shutdown()
         self._monitoring_tab.stop_pipeline()
         self._streaming_tab.cleanup()

@@ -10,10 +10,12 @@ from PyQt5.QtWidgets import (
     QFrame, QScrollArea, QSplitter, QProgressBar,
     QGroupBox, QGridLayout, QCheckBox, QSizePolicy,
     QRadioButton, QTimeEdit, QMessageBox, QTabWidget, QDialog, QDialogButtonBox,
-    QButtonGroup, QInputDialog
+    QButtonGroup, QInputDialog, QToolTip
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize, QEvent
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtCore import (
+    Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize, QEvent, QObject,
+)
+from PyQt5.QtGui import QFont, QPixmap, QColor
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
 from models.sensor_config import (
@@ -262,6 +264,40 @@ QTabBar::tab:hover:!selected {
     color: #CBD5E1;
 }
 """
+
+
+class InstantItemTooltips(QObject):
+    """Show a combo popup item's tooltip the moment the mouse is over it.
+
+    Qt's normal tooltip path waits ~700 ms before showing, which makes a
+    greyed-out item's explanation easy to miss entirely - the user has
+    usually moved on before it appears. This tracks mouse movement over the
+    popup list and shows/hides the tooltip with zero delay.
+    """
+
+    def __init__(self, combo: QComboBox) -> None:
+        view = combo.view()
+        super().__init__(view)
+        self._view = view
+        self._last_row = -1
+        view.viewport().setMouseTracking(True)
+        view.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseMove:
+            index = self._view.indexAt(event.pos())
+            row = index.row() if index.isValid() else -1
+            if row != self._last_row:
+                self._last_row = row
+                tip = index.data(Qt.ToolTipRole) if index.isValid() else None
+                if tip:
+                    QToolTip.showText(event.globalPos(), tip, self._view)
+                else:
+                    QToolTip.hideText()
+        elif event.type() in (QEvent.Hide, QEvent.Leave):
+            self._last_row = -1
+            QToolTip.hideText()
+        return False  # never consume; the popup behaves normally
 
 
 class WelcomeDialog(QDialog):
@@ -1024,6 +1060,8 @@ class MainWindow(QMainWindow):
         self._odr_combo.setCurrentText("1666 Hz")
         self._odr_combo.setMinimumWidth(120)
         self._odr_combo.currentIndexChanged.connect(self._on_settings_changed)
+        # Greyed-out rates explain themselves instantly on hover
+        self._odr_tooltips = InstantItemTooltips(self._odr_combo)
         odr_layout.addWidget(self._odr_combo)
         odr_layout.addStretch()
         settings_grid.addLayout(odr_layout, row, 1)
@@ -1595,14 +1633,36 @@ class MainWindow(QMainWindow):
     def _refresh_odr_choices(self, config: SensorConfig) -> None:
         """Rebuild the ODR list from the sensor's model + gyro selection.
 
+        Every rate stays visible; ones this sensor can't use right now are
+        greyed out with a tooltip saying why, instead of silently missing.
+
         Caller must have already clamped config.sample_rate to an allowed
-        value (clamp_to_capabilities), so the current selection always
-        exists in the rebuilt list.
+        value (clamp_to_capabilities), so the current selection is always
+        selectable in the rebuilt list.
         """
+        allowed = config.allowed_sample_rates()
         self._odr_combo.blockSignals(True)
         self._odr_combo.clear()
-        for rate in config.allowed_sample_rates():
+        item_model = self._odr_combo.model()
+        for rate in SampleRate.all_rates():
             self._odr_combo.addItem(rate.display_name, rate)
+            if rate not in allowed:
+                item = item_model.item(self._odr_combo.count() - 1)
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                # The app-wide stylesheet pins one text color on everything,
+                # which hides Qt's normal disabled-item dimming - dim the
+                # item explicitly so it visibly reads as unavailable
+                item.setForeground(QColor("#475569"))
+                if rate.value > config.model.max_sample_rate_hz:
+                    item.setToolTip(
+                        f"Not supported on EVB-Lite (max "
+                        f"{int(config.model.max_sample_rate_hz)} Hz)"
+                    )
+                else:
+                    item.setToolTip(
+                        "At 6666 Hz the sensor can record only one channel -\n"
+                        "disable the gyroscope to use this rate"
+                    )
         self._odr_combo.setCurrentText(config.sample_rate.display_name)
         self._odr_combo.blockSignals(False)
 

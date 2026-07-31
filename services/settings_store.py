@@ -66,6 +66,7 @@ class SensorSettingsStore:
             config.accel_range = AccelRange(entry.get("accel_range", config.accel_range.value))
             config.gyro_enabled = bool(entry.get("gyro_enabled", False))
             config.gyro_range = GyroRange.from_value(entry.get("gyro_range", config.gyro_range.value))
+            config.gravity_comp = bool(entry.get("gravity_comp", False))
             config.model = SensorModel(entry.get("model", SensorModel.UNKNOWN.value))
             folder = entry.get("output_folder")
             if folder and Path(folder).is_dir():
@@ -93,6 +94,7 @@ class SensorSettingsStore:
             "accel_range": config.accel_range.value,
             "gyro_enabled": config.gyro_enabled,
             "gyro_range": config.gyro_range.value,
+            "gravity_comp": config.gravity_comp,
             "model": config.model.value,
             "output_folder": str(config.output_folder) if config.output_folder else None,
             "upload_to_aws": config.upload_to_aws,

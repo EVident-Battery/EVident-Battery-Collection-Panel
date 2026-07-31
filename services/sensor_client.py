@@ -78,6 +78,14 @@ class SensorClient:
         r.raise_for_status()
         return r.json()
 
+    def set_gravity_comp(self, enabled: bool) -> Dict:
+        """Enable/disable the on-sensor gravity compensation high-pass filter."""
+        value = "true" if enabled else "false"
+        url = f"{self.base_url}/gravity_comp?value={value}"
+        r = requests.post(url, timeout=(5, 10))
+        r.raise_for_status()
+        return r.json()
+
     def set_collect(self, accel: bool = True, gyro: bool = False) -> Dict:
         """Select which channels the sensor records (accel is always on)."""
         accel_arg = "true" if accel else "false"

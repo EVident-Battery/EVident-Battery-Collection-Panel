@@ -58,6 +58,7 @@ class CollectorWorker(QThread):
         accel_range: int = 4,
         gyro_enabled: bool = False,
         gyro_range: int = 500,
+        gravity_comp: bool = False,
     ) -> None:
         super().__init__()
         self.hostname = hostname
@@ -69,6 +70,7 @@ class CollectorWorker(QThread):
         self.accel_range = accel_range
         self.gyro_enabled = gyro_enabled
         self.gyro_range = gyro_range
+        self.gravity_comp = gravity_comp
         self.started_at: Optional[datetime] = None
         self._cancelled = False
 
@@ -135,6 +137,10 @@ class CollectorWorker(QThread):
         self._apply_setting(
             f"accel range {self.accel_range}g",
             lambda: client.set_accel_range(self.accel_range),
+        )
+        self._apply_setting(
+            f"gravity compensation {'on' if self.gravity_comp else 'off'}",
+            lambda: client.set_gravity_comp(self.gravity_comp),
         )
 
     def _diagnose_stall(self, client: SensorClient) -> str:
@@ -348,6 +354,7 @@ class CollectorService(QObject):
         accel_range: int = 4,
         gyro_enabled: bool = False,
         gyro_range: int = 500,
+        gravity_comp: bool = False,
     ) -> bool:
         """
         Start a collection cycle for a sensor.
@@ -360,6 +367,7 @@ class CollectorService(QObject):
         worker = CollectorWorker(
             hostname, ip, duration, output_folder, upload_to_aws,
             sample_rate, accel_range, gyro_enabled, gyro_range,
+            gravity_comp,
         )
         worker.status_changed.connect(self._on_status)
         worker.progress_updated.connect(self._on_progress)

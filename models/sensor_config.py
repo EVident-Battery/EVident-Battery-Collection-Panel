@@ -224,6 +224,11 @@ class SensorConfig:
     gyro_enabled: bool = False
     gyro_range: GyroRange = GyroRange.DPS_500
 
+    # On-sensor high-pass filter removing the constant gravity offset from
+    # accel data. Supported by both EVB-01 and EVB-Lite. Off by default,
+    # matching the sensor's own default.
+    gravity_comp: bool = False
+
     # Hardware model, detected by a background /settings probe and persisted
     model: SensorModel = SensorModel.UNKNOWN
     output_folder: Optional[Path] = None

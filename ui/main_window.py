@@ -1082,6 +1082,15 @@ class MainWindow(QMainWindow):
         self._accel_range_combo.setMinimumWidth(100)
         self._accel_range_combo.currentIndexChanged.connect(self._on_settings_changed)
         accel_layout.addWidget(self._accel_range_combo)
+        self._gravity_check = QCheckBox("Gravity comp")
+        self._gravity_check.setToolTip(
+            "On-sensor high-pass filter that removes the constant gravity\n"
+            "offset - accel output is centered on zero. Also removes any\n"
+            "real DC/low-frequency content, so leave it off when slow\n"
+            "drift or orientation matters."
+        )
+        self._gravity_check.toggled.connect(self._on_settings_changed)
+        accel_layout.addWidget(self._gravity_check)
         self._accel_lock_hint = QLabel("")
         self._accel_lock_hint.setStyleSheet(
             "color: #64748B; font-size: 11px; font-style: italic;"
@@ -1302,6 +1311,7 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.setEnabled(enabled)
         self._odr_combo.setEnabled(enabled)
         self._accel_range_combo.setEnabled(enabled)
+        self._gravity_check.setEnabled(enabled)
         self._gyro_check.setEnabled(enabled)
         self._gyro_range_combo.setEnabled(enabled and self._gyro_check.isChecked())
         self._browse_btn.setEnabled(enabled)
@@ -1537,6 +1547,7 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.blockSignals(True)
         self._odr_combo.blockSignals(True)
         self._accel_range_combo.blockSignals(True)
+        self._gravity_check.blockSignals(True)
         self._gyro_check.blockSignals(True)
         self._gyro_range_combo.blockSignals(True)
         self._aws_checkbox.blockSignals(True)
@@ -1555,6 +1566,7 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.setCurrentText(config.interval_unit.value)
         self._refresh_odr_choices(config)
         self._accel_range_combo.setCurrentText(config.accel_range.display_name)
+        self._gravity_check.setChecked(config.gravity_comp)
         self._gyro_check.setChecked(config.gyro_enabled)
         self._gyro_range_combo.setCurrentText(config.gyro_range.display_name)
         self._aws_checkbox.setChecked(config.upload_to_aws)
@@ -1595,6 +1607,7 @@ class MainWindow(QMainWindow):
         self._interval_unit_combo.blockSignals(False)
         self._odr_combo.blockSignals(False)
         self._accel_range_combo.blockSignals(False)
+        self._gravity_check.blockSignals(False)
         self._gyro_check.blockSignals(False)
         self._gyro_range_combo.blockSignals(False)
         self._aws_checkbox.blockSignals(False)
@@ -1831,6 +1844,7 @@ class MainWindow(QMainWindow):
         config.interval_unit = IntervalUnit(self._interval_unit_combo.currentText())
         config.sample_rate = self._odr_combo.currentData()
         config.accel_range = self._accel_range_combo.currentData()
+        config.gravity_comp = self._gravity_check.isChecked()
         config.gyro_enabled = self._gyro_check.isChecked()
         config.gyro_range = self._gyro_range_combo.currentData()
         config.upload_to_aws = self._aws_checkbox.isChecked()
@@ -1881,6 +1895,7 @@ class MainWindow(QMainWindow):
             config.interval_unit = source_config.interval_unit
             config.sample_rate = source_config.sample_rate
             config.accel_range = source_config.accel_range
+            config.gravity_comp = source_config.gravity_comp
             config.gyro_enabled = source_config.gyro_enabled
             config.gyro_range = source_config.gyro_range
             config.output_folder = source_config.output_folder
@@ -2397,6 +2412,7 @@ class MainWindow(QMainWindow):
             accel_range=config.accel_range.value,
             gyro_enabled=config.gyro_enabled,
             gyro_range=config.gyro_range.value,
+            gravity_comp=config.gravity_comp,
         )
         
         if not success:

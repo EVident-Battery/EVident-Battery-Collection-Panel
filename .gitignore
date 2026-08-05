@@ -7,3 +7,4 @@ aws_code.py
 venv_linux_x86
 *.pyc
 _version.py
+_trial_stamp.py

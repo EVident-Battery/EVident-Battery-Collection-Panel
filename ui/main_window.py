@@ -34,6 +34,7 @@ from ui.log_widget import LogWidget, LogLevel
 from ui.monitoring_tab import MonitoringTabWidget
 from ui.analysis_tab import AnalysisTabWidget
 from ui.streaming_tab import StreamingTabWidget
+import trial
 
 
 # Stylesheet for the entire application
@@ -306,7 +307,7 @@ class WelcomeDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Notice")
-        self.setFixedSize(480, 340)
+        self.setFixedSize(480, 410 if trial.is_trial() else 340)
         self.setModal(True)
         self.setStyleSheet("""
             QDialog {
@@ -316,6 +317,14 @@ class WelcomeDialog(QDialog):
                 color: #E2E8F0;
                 font-size: 18px;
                 font-weight: bold;
+            }
+            QLabel#trialBanner {
+                color: #FCD34D;
+                background-color: #1E293B;
+                border: 1px solid #F59E0B;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
             }
             QLabel#body {
                 color: #CBD5E1;
@@ -347,6 +356,26 @@ class WelcomeDialog(QDialog):
         title.setObjectName("title")
         title.setAlignment(Qt.AlignLeft)
         layout.addWidget(title)
+
+        if trial.is_trial():
+            remaining = trial.days_remaining()
+            if remaining == 0:
+                remaining_text = "expires today"
+            elif remaining == 1:
+                remaining_text = "1 day remaining"
+            else:
+                remaining_text = f"{remaining} days remaining"
+            banner_html = (
+                '<span style="color:#F59E0B; font-weight:bold;">TRIAL VERSION</span>'
+                ' &nbsp;&middot;&nbsp; '
+                f'Expires {trial.TRIAL_EXPIRY_DATE.strftime("%B %d, %Y")}'
+                f' &nbsp;&middot;&nbsp; {remaining_text}'
+            )
+            banner = QLabel(banner_html)
+            banner.setObjectName("trialBanner")
+            banner.setTextFormat(Qt.RichText)
+            banner.setWordWrap(True)
+            layout.addWidget(banner)
 
         body_html = (
             '<p style="color:#CBD5E1; font-size:12px;">'

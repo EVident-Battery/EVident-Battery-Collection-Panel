@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
+from ui.fonts import DEFAULT_FONT_FAMILY, MONO_FONT_FAMILY
 
 from models.sensor_config import SensorConfig, SensorStatus, DiscoverySource
 
@@ -54,7 +55,7 @@ class SensorCardWidget(QFrame):
         top_row.setSpacing(8)
         
         self._hostname_label = QLabel(self.config.display_name)
-        self._hostname_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self._hostname_label.setFont(QFont(DEFAULT_FONT_FAMILY, 11, QFont.Bold))
         self._hostname_label.setStyleSheet("color: #F1F5F9;")
         top_row.addWidget(self._hostname_label)
 
@@ -83,7 +84,7 @@ class SensorCardWidget(QFrame):
         top_row.addStretch()
         
         self._battery_label = QLabel()
-        self._battery_label.setFont(QFont("Segoe UI", 10))
+        self._battery_label.setFont(QFont(DEFAULT_FONT_FAMILY, 10))
         self._update_battery_display()
         top_row.addWidget(self._battery_label)
         
@@ -112,7 +113,7 @@ class SensorCardWidget(QFrame):
 
             # Countdown display
             self._countdown_label = QLabel("⏱ --:--")
-            self._countdown_label.setFont(QFont("Consolas", 11))
+            self._countdown_label.setFont(QFont(MONO_FONT_FAMILY, 11))
             self._countdown_label.setStyleSheet("color: #94A3B8;")
             bottom_row.addWidget(self._countdown_label)
 

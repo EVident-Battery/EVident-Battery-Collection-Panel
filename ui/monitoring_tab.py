@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QTime, QThread, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QFont
+from ui.fonts import MONO_FONT_FAMILY
 
 from models.sensor_config import SensorConfig, SampleRate
 from models.monitoring_config import (
@@ -587,7 +588,7 @@ class MonitoringTabWidget(QWidget):
         layout.addWidget(self._phase_dot)
 
         self._phase_label = QLabel("IDLE")
-        self._phase_label.setFont(QFont("Consolas", 12, QFont.Bold))
+        self._phase_label.setFont(QFont(MONO_FONT_FAMILY, 12, QFont.Bold))
         self._phase_label.setStyleSheet("color: #64748B;")
         layout.addWidget(self._phase_label)
 
@@ -658,7 +659,7 @@ class MonitoringTabWidget(QWidget):
         layout.addWidget(title_lbl)
 
         value_lbl = QLabel(value)
-        value_lbl.setFont(QFont("Consolas", 14, QFont.Bold))
+        value_lbl.setFont(QFont(MONO_FONT_FAMILY, 14, QFont.Bold))
         value_lbl.setStyleSheet("color: #3B82F6;")
         value_lbl.setObjectName(f"stat_{title.lower()}")
         layout.addWidget(value_lbl)

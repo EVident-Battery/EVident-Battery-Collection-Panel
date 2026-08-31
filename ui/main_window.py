@@ -16,6 +16,7 @@ from PyQt5.QtCore import (
     Qt, pyqtSlot, QTimer, QTime, QElapsedTimer, QSize, QEvent, QObject,
 )
 from PyQt5.QtGui import QFont, QPixmap, QColor
+from ui.fonts import DEFAULT_FONT_FAMILY, MONO_FONT_FAMILY
 from PyQt5.QtSvg import QSvgWidget, QSvgRenderer
 
 from models.sensor_config import (
@@ -128,6 +129,15 @@ QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled, QLineEdit:disabl
 
 QComboBox::down-arrow:disabled {
     border-top-color: #334155;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #1E293B;
+    color: #E2E8F0;
+    border: 1px solid #334155;
+    selection-background-color: #3B82F6;
+    selection-color: #FFFFFF;
+    outline: none;
 }
 
 QComboBox::drop-down {
@@ -575,7 +585,7 @@ class MainWindow(QMainWindow):
 
         # Title
         title = QLabel("Evident Battery Device Hub")
-        title.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        title.setFont(QFont(DEFAULT_FONT_FAMILY, 20, QFont.Bold))
         title.setStyleSheet("color: #0F172A; border: none;")
         # CRITICAL: This tells the layout "I need this space, do not shrink me"
         title.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -607,7 +617,7 @@ class MainWindow(QMainWindow):
 
         # Timer Display
         self._uptime_label = QLabel("00:00:00")
-        self._uptime_label.setFont(QFont("Consolas", 16, QFont.Bold))
+        self._uptime_label.setFont(QFont(MONO_FONT_FAMILY, 16, QFont.Bold))
         self._uptime_label.setStyleSheet("color: #334155;")
         # CRITICAL: Lock width to content
         self._uptime_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -878,7 +888,7 @@ class MainWindow(QMainWindow):
         
         # Selected sensor info
         self._selected_label = QLabel("No sensor selected")
-        self._selected_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self._selected_label.setFont(QFont(DEFAULT_FONT_FAMILY, 12, QFont.Bold))
         self._selected_label.setStyleSheet("color: #F1F5F9;")
         layout.addWidget(self._selected_label)
         
@@ -1246,7 +1256,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(2)
         
         value_lbl = QLabel(value)
-        value_lbl.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        value_lbl.setFont(QFont(DEFAULT_FONT_FAMILY, 18, QFont.Bold))
         value_lbl.setStyleSheet("color: #3B82F6;")
         value_lbl.setObjectName(f"stat_{label.lower()}")
         layout.addWidget(value_lbl)

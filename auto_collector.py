@@ -17,6 +17,7 @@ import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QCoreApplication
 from PyQt5.QtGui import QGuiApplication, QFont
+from ui.fonts import DEFAULT_FONT_FAMILY
 
 from ui.main_window import MainWindow
 
@@ -46,11 +47,16 @@ def main() -> int:
     configure_high_dpi()
     
     app = QApplication(sys.argv)
+    if sys.platform == "darwin":
+        # macOS: the native style ignores QSS on QComboBox popup lists (white-on-white
+        # menus) and renders QMessageBox inconsistently with the dark theme. Fusion
+        # honours the stylesheet everywhere; Windows keeps its default style.
+        app.setStyle("Fusion")
     app.setApplicationName("Sensor Auto Collector")
     app.setOrganizationName("SensorQA")
     
     # Set default font
-    font = QFont("Segoe UI", 10)
+    font = QFont(DEFAULT_FONT_FAMILY, 10)
     app.setFont(font)
     
     # Create and show main window

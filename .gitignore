@@ -7,3 +7,12 @@ aws_code.py
 venv_linux_x86
 *.pyc
 _version.py
+
+# never commit signing material
+*.p8
+*.key
+*.p12
+*.cer
+*.csr
+*.mobileprovision
+*.provisionprofile

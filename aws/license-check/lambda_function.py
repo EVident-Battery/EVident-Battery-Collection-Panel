@@ -45,9 +45,23 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
-def _no(reason: str) -> dict:
+def _no(reason: str, email: str | None = None) -> dict:
     print(f"activate: allowed=false reason={reason}")
-    return _resp(200, {"allowed": False, "reason": reason})
+    body = {"allowed": False, "reason": reason}
+    if email:
+        body["email"] = email
+    return _resp(200, body)
+
+
+def _user_email(sb: Client, user_id: str) -> str | None:
+    """Best-effort: look up the account email via the auth admin API."""
+    try:
+        res = sb.auth.admin.get_user_by_id(user_id)
+        user = getattr(res, "user", None) or res
+        return getattr(user, "email", None)
+    except Exception as e:
+        print(f"activate: email lookup failed {type(e).__name__}")
+        return None
 
 
 def _parse_ts(value: str) -> datetime:
@@ -89,6 +103,7 @@ def lambda_handler(event, context):
             return _no("invalid_key")
         license_id = r.data[0]["id"]
         user_id = r.data[0]["user_id"]
+        email = _user_email(sb, user_id)
 
         # 2) subscription row
         r = (
@@ -100,16 +115,16 @@ def lambda_handler(event, context):
             .execute()
         )
         if not r.data:
-            return _no("no_subscription")
+            return _no("no_subscription", email)
         sub = r.data[0]
 
         status = sub.get("subscription_status")
         end_at = sub.get("subscription_end_at")
         price_id = sub.get("stripe_price_id")
         if status != "active" or not end_at or _parse_ts(end_at) <= datetime.now(timezone.utc):
-            return _no("expired")
+            return _no("expired", email)
         if not price_id:
-            return _no("not_annual")
+            return _no("not_annual", email)
 
         # 3) plan interval
         r = (
@@ -121,7 +136,7 @@ def lambda_handler(event, context):
             .execute()
         )
         if not r.data or r.data[0].get("billing_interval") != "year":
-            return _no("not_annual")
+            return _no("not_annual", email)
         plan_name = r.data[0].get("name")
 
     except KeyError as e:
@@ -134,6 +149,7 @@ def lambda_handler(event, context):
     print(f"activate: allowed=true license_id={license_id}")
     body = {
         "allowed": True,
+        "email": email,
         "product": PRODUCT,
         "plan": plan_name,
         "subscription_end_at": end_at,

@@ -34,15 +34,20 @@ Body is ignored.
 Yes/no is always HTTP 200:
 
 ```json
-{"allowed": true, "product": "device-hub-pro", "plan": "Annual Plan",
+{"allowed": true, "email": "user@example.com", "product": "device-hub-pro", "plan": "Annual Plan",
  "subscription_end_at": "2027-03-01T00:00:00+00:00",
  "license_id": "<uuid>", "activation_token": "<uuid>.<hmac-sha256 hex>"}
 
-{"allowed": false, "reason": "invalid_key"}       // unknown or deactivated key
-{"allowed": false, "reason": "no_subscription"}   // no subscription_profiles row
-{"allowed": false, "reason": "expired"}           // status not active, or end date passed (includes trials)
-{"allowed": false, "reason": "not_annual"}        // monthly or unknown plan
+{"allowed": false, "reason": "invalid_key"}                                  // unknown or deactivated key
+{"allowed": false, "reason": "no_subscription", "email": "user@example.com"} // no subscription_profiles row
+{"allowed": false, "reason": "expired", "email": "user@example.com"}         // status not active, or end date passed (includes trials)
+{"allowed": false, "reason": "not_annual", "email": "user@example.com"}      // monthly or unknown plan
 ```
+
+`email` is the portal account the key belongs to, looked up through the Supabase
+auth admin API. It is present whenever the key resolved to an account, so the
+app can show "Connected as user@example.com" even on a no. It may be null if
+the auth lookup fails; the decision does not depend on it.
 
 Not a decision — retry later, keep last known state:
 

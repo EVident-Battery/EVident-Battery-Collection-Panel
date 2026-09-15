@@ -19,8 +19,16 @@ class _Query:
     def execute(self):
         return types.SimpleNamespace(data=self._rows)
 
+class _Admin:
+    def get_user_by_id(self, uid):
+        if uid == "u1":
+            return types.SimpleNamespace(user=types.SimpleNamespace(email="andrew@example.com"))
+        raise LookupError("no such user")
+
 class _Client:
-    def __init__(self, db): self._db = db
+    def __init__(self, db):
+        self._db = db
+        self.auth = types.SimpleNamespace(admin=_Admin())
     def table(self, name): return _Query(self._db, name)
 
 class _Boom:
@@ -57,7 +65,7 @@ def call(key="GOOD-KEY", data=None, boom=False):
     return r["statusCode"], json.loads(r["body"])
 
 cases = [
-    ("annual active -> yes",      call(),                                   200, {"allowed": True, "plan": "Annual Plan"}),
+    ("annual active -> yes",      call(),                                   200, {"allowed": True, "plan": "Annual Plan", "email": "andrew@example.com"}),
     ("missing header -> 400",     call(key=None),                           400, {"error": "missing_auth_token"}),
     ("unknown key -> invalid",    call(key="NOPE"),                         200, {"allowed": False, "reason": "invalid_key"}),
     ("inactive key -> invalid",   call(data=db(active_key=False)),          200, {"allowed": False, "reason": "invalid_key"}),
@@ -65,7 +73,7 @@ cases = [
     ("expired date -> expired",   call(data=db(end=past)),                  200, {"allowed": False, "reason": "expired"}),
     ("canceled status -> expired",call(data=db(status="canceled")),         200, {"allowed": False, "reason": "expired"}),
     ("trialing -> expired",       call(data=db(status="trialing")),         200, {"allowed": False, "reason": "expired"}),
-    ("monthly -> not_annual",     call(data=db(price="price_month")),       200, {"allowed": False, "reason": "not_annual"}),
+    ("monthly -> not_annual",     call(data=db(price="price_month")),       200, {"allowed": False, "reason": "not_annual", "email": "andrew@example.com"}),
     ("unknown price -> not_annual", call(data=db(price="price_zzz")),       200, {"allowed": False, "reason": "not_annual"}),
     ("backend down -> 503",       call(boom=True),                          503, {"error": "service_unavailable"}),
 ]

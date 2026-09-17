@@ -67,9 +67,11 @@ A decision is always HTTP 200:
  "license_id": "<uuid>", "devices_used": 2, "device_limit": 3,
  "activation_token": "<license_id>.<hmac-sha256 hex>"}
 
-// check, yes
+// check, yes. Usage is current as of this call, so it follows deactivations
+// made in the portal and a cap changed by an admin.
 {"allowed": true, "email": "user@example.com", "product": "device-hub-pro",
- "license_id": "<uuid>", "activation_token": "..."}
+ "license_id": "<uuid>", "devices_used": 2, "device_limit": 3,
+ "activation_token": "..."}
 
 // deactivate
 {"deactivated": true}      // false if this computer held no slot

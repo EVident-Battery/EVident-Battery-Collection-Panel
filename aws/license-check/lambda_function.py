@@ -40,6 +40,7 @@ from supabase import create_client, Client
 
 PRODUCT = "device-hub-pro"
 ACTIONS = ("activate", "check", "deactivate")
+DEFAULT_DEVICE_LIMIT = 3  # same fallback as claim_license_device() for an account with no profile row
 DEVICE_ID = re.compile(r"^[A-Za-z0-9_\-:.]{8,128}$")
 _client: Client | None = None
 
@@ -120,6 +121,20 @@ def _live_devices(sb: Client, user_id: str) -> list[dict]:
         .execute()
     )
     return r.data or []
+
+
+def _usage(sb: Client, user_id: str) -> tuple[int, int]:
+    """(computers holding a slot, the account's cap), as the claim function counts them."""
+    used = len(_live_devices(sb, user_id))
+    r = (
+        sb.table("user_profiles")
+        .select("device_activation_limit")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    limit = (r.data[0].get("device_activation_limit") if r.data else None) or DEFAULT_DEVICE_LIMIT
+    return used, limit
 
 
 def _subscription_verdict(sb: Client, user_id: str, env_name: str):
@@ -232,7 +247,9 @@ def lambda_handler(event, context):
             if not r.data:
                 return _no(action, "device_deactivated", email)
             print(f"license: action=check allowed=true license_id={license_id}")
-            out = {"allowed": True, "email": email, "product": PRODUCT, "license_id": license_id}
+            used, limit = _usage(sb, user_id)
+            out = {"allowed": True, "email": email, "product": PRODUCT, "license_id": license_id,
+                   "devices_used": used, "device_limit": limit}
             token = _activation_token(license_id, device_id)
             if token:
                 out["activation_token"] = token

@@ -171,7 +171,8 @@ results.append("activation_token" not in b)
 print(("PASS" if results[-1] else "FAIL"), "  ...and carries no token")
 
 # ---- check-in ---------------------------------------------------------------
-check("check A -> allowed", call(body={"action": "check", "device_id": DEV_A}), 200, {"allowed": True, "email": "andrew@example.com"})
+check("check A -> allowed, with usage", call(body={"action": "check", "device_id": DEV_A}), 200,
+      {"allowed": True, "email": "andrew@example.com", "devices_used": 3, "device_limit": 3})
 check("check D (never activated) -> device_deactivated", call(body={"action": "check", "device_id": DEV_D}), 200, {"allowed": False, "reason": "device_deactivated"})
 results.append(len([r for r in fake.DB["license_device_activations"] if r["deactivated_at"] is None]) == 3)
 print(("PASS" if results[-1] else "FAIL"), "  ...and check claimed no slot for D")
@@ -198,6 +199,13 @@ fake.DB["user_license_keys"][0]["is_active"] = False
 fake.DB["user_license_keys"].append({"id": "lic-2", "user_id": "u1", "license_key": "NEW-KEY", "is_active": True})
 check("check A with the old key -> invalid_key", call(body={"action": "check", "device_id": DEV_A}), 200, {"allowed": False, "reason": "invalid_key"})
 check("activate A with the new key -> existing slot", call(key="NEW-KEY"), 200, {"allowed": True, "devices_used": 2, "license_id": "lic-2"})
+
+# usage on check follows the portal: one slot freed there, and the cap raised by an admin
+check("check A -> usage reflects portal deactivations", call(key="NEW-KEY", body={"action": "check", "device_id": DEV_A}), 200,
+      {"allowed": True, "devices_used": 2, "device_limit": 3})
+fake.DB["user_profiles"] = [{"user_id": "u1", "device_activation_limit": 5}]
+check("check A -> usage reflects an admin raising the cap", call(key="NEW-KEY", body={"action": "check", "device_id": DEV_A}), 200,
+      {"allowed": True, "devices_used": 2, "device_limit": 5})
 
 # ---- token is bound to the device ------------------------------------------------
 lic, mac = tok_a.split(".")

@@ -1,2 +1,4 @@
 license-check.zip
 activation_hmac_secret.txt
+.venv-local/
+__pycache__/

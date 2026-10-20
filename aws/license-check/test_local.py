@@ -213,6 +213,36 @@ def want(dev): return hmac.new(b"testsecret", f"{lic}:{dev}:device-hub-pro".enco
 results.append(mac == want(DEV_A)); print(("PASS" if results[-1] else "FAIL"), "token verifies on the computer it was issued to")
 results.append(mac != want(DEV_B)); print(("PASS" if results[-1] else "FAIL"), "the same token fails on a different computer")
 
+# ---- enterprise grants (product_entitlements) -------------------------------------
+def grant(feature="enterprise", starts=past, expires=None, revoked=None, product="device-hub-pro"):
+    return {"user_id": "u1", "product": product, "feature": feature, "starts_at": starts,
+            "expires_at": expires, "revoked_at": revoked}
+def ftok(lic, dev, features):
+    return hmac.new(b"testsecret", f"{lic}:{dev}:device-hub-pro:features:{','.join(features)}".encode(), hashlib.sha256).hexdigest()
+
+b = check("no grant -> features empty", call(data=db()), 200, {"allowed": True, "features": []})
+results.append(b.get("features_token") == ftok("lic-1", DEV_A, [])); print(("PASS" if results[-1] else "FAIL"), "  ...with a token over the empty list")
+
+ent = db(has_sub=False); ent["product_entitlements"] = [grant()]
+b = check("enterprise, no subscription -> allowed", call(data=ent), 200,
+          {"allowed": True, "plan": "Enterprise", "features": ["enterprise"], "subscription_end_at": None})
+results.append(b.get("features_token") == ftok("lic-1", DEV_A, ["enterprise"])); print(("PASS" if results[-1] else "FAIL"), "  ...features token verifies")
+results.append(b.get("features_token") != ftok("lic-1", DEV_B, ["enterprise"])); print(("PASS" if results[-1] else "FAIL"), "  ...and fails on another computer")
+results.append(b.get("features_token") != ftok("lic-1", DEV_A, [])); print(("PASS" if results[-1] else "FAIL"), "  ...and for another feature list")
+check("enterprise still respects the device cap", call(body={"device_id": DEV_B}), 200, {"allowed": True, "devices_used": 2})
+check("check -> enterprise", call(body={"action": "check", "device_id": DEV_A}), 200, {"allowed": True, "features": ["enterprise"]})
+fake.DB["product_entitlements"][0]["revoked_at"] = "2026-10-20T00:00:00+00:00"
+check("revoked -> check still allowed, enterprise gone", call(body={"action": "check", "device_id": DEV_A}), 200, {"allowed": True, "features": []})
+check("revoked, no subscription -> new activation refused", call(body={"device_id": DEV_C}), 200, {"allowed": False, "reason": "no_subscription"})
+
+for name, g in [("expired", grant(expires=past)), ("not started", grant(starts=future)), ("other product", grant(product="other"))]:
+    d = db(has_sub=False); d["product_entitlements"] = [g]
+    check(f"{name} grant -> refused without subscription", call(data=d), 200, {"allowed": False, "reason": "no_subscription"})
+d = db(); d["product_entitlements"] = [grant(expires=future)]
+check("annual + dated grant -> plan Enterprise", call(data=d), 200, {"allowed": True, "plan": "Enterprise", "features": ["enterprise"]})
+d = db(); d["product_entitlements"] = [grant(), grant()]
+check("two live grants -> one feature", call(data=d), 200, {"features": ["enterprise"]})
+
 fails = results.count(False)
 print(f"\nRESULT: {len(results) - fails}/{len(results)} passed" + ("" if not fails else f", {fails} FAILED"))
 sys.exit(1 if fails else 0)

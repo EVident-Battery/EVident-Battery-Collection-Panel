@@ -12,6 +12,8 @@ misleading 403. `/uploads` and its token-authorizer are untouched.
 `20260917120000_license_device_activations.sql`** (data-web-portal repo, branch
 `feature/license-device-activations`). Deploy this Lambda only after that
 migration is on the database it points at, or every activation answers 503.
+The same holds for `20261020120000_product_entitlements.sql` (Enterprise
+grants, below): run it before deploying this version.
 
 ## Request
 
@@ -137,6 +139,28 @@ def token_ok(token: str, device_id: str, secret: str) -> bool:
 
 Tokens issued before the device limit (MAC over `<license_id>:device-hub-pro`)
 no longer verify. Only test accounts held one.
+
+## Enterprise (features)
+
+Every yes from `activate` and `check` also carries
+
+```json
+"features": ["enterprise"],          // or [] — the account's live grants, sorted
+"features_token": "<hmac-sha256 hex>"
+```
+
+with `features_token = HMAC-SHA256(secret, "<license_id>:<device_id>:device-hub-pro:features:<comma-joined features>")`.
+Device Hub Pro keeps the features only while that token verifies, and
+Enterprise unlocks Custom Views.
+
+Grants live in `product_entitlements` (portal migration
+`20261020120000_product_entitlements.sql`), written by an admin with SQL per
+contract. A grant is live when started, not expired and not revoked. A live
+`enterprise` grant replaces the annual-subscription rule at activation (`plan`
+is then `"Enterprise"`, `subscription_end_at` null); the device cap still
+applies. Features are re-read on every `check`, unlike the subscription, so
+revoking or expiring a grant turns Enterprise off at the app's next start
+while Advanced stays.
 
 ## Files
 

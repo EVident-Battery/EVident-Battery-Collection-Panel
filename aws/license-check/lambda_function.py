@@ -22,6 +22,14 @@ Activation rule, all of:
      (claim_license_device() in the portal's migration
      20260917120000_license_device_activations.sql; default cap 3,
      user_profiles.device_activation_limit)
+A live Enterprise grant (product_entitlements, portal migration
+20261020120000_product_entitlements.sql) replaces 2 and 3.
+
+Features: activate and check both return `features` (the account's live
+product_entitlements, e.g. ["enterprise"], possibly empty) and, with the
+secret, `features_token`: an HMAC binding them to the license and computer.
+Unlike activation, features are re-read on every check-in, so a revoked or
+expired grant turns off at the app's next start.
 
 Always 200 for a yes or a no (client reads `allowed`). Non-200 means "could not
 decide", and the app keeps whatever it last knew: 400 malformed request,
@@ -108,6 +116,46 @@ def _activation_token(license_id: str, device_id: str) -> str | None:
     msg = f"{license_id}:{device_id}:{PRODUCT}".encode()
     mac = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
     return f"{license_id}.{mac}"
+
+
+def _features_token(license_id: str, device_id: str, features: list[str]) -> str | None:
+    """HMAC over license, device, product and the sorted feature list.
+
+    A separate token so the activation token keeps its format; editing the
+    saved feature list on the computer breaks this MAC.
+    """
+    secret = os.environ.get("ACTIVATION_HMAC_SECRET")
+    if not secret:
+        return None
+    msg = f"{license_id}:{device_id}:{PRODUCT}:features:{','.join(features)}".encode()
+    return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def _features(sb: Client, user_id: str) -> list[str]:
+    """The account's live grants: started, not expired, not revoked. Sorted."""
+    r = (
+        sb.table("product_entitlements")
+        .select("feature,starts_at,expires_at")
+        .eq("user_id", user_id)
+        .eq("product", PRODUCT)
+        .is_("revoked_at", "null")
+        .execute()
+    )
+    now = datetime.now(timezone.utc)
+    live = {
+        g["feature"]
+        for g in r.data or []
+        if _parse_ts(g["starts_at"]) <= now and (not g.get("expires_at") or _parse_ts(g["expires_at"]) > now)
+    }
+    return sorted(live)
+
+
+def _with_features(out: dict, license_id: str, device_id: str, features: list[str]) -> dict:
+    out["features"] = features
+    token = _features_token(license_id, device_id, features)
+    if token:
+        out["features_token"] = token
+    return out
 
 
 def _live_devices(sb: Client, user_id: str) -> list[dict]:
@@ -246,19 +294,24 @@ def lambda_handler(event, context):
             )
             if not r.data:
                 return _no(action, "device_deactivated", email)
-            print(f"license: action=check allowed=true license_id={license_id}")
+            features = _features(sb, user_id)
+            print(f"license: action=check allowed=true license_id={license_id} features={','.join(features)}")
             used, limit = _usage(sb, user_id)
             out = {"allowed": True, "email": email, "product": PRODUCT, "license_id": license_id,
                    "devices_used": used, "device_limit": limit}
             token = _activation_token(license_id, device_id)
             if token:
                 out["activation_token"] = token
-            return _resp(200, out)
+            return _resp(200, _with_features(out, license_id, device_id, features))
 
         # ---- activate --------------------------------------------------------
-        reason, plan_name, end_at = _subscription_verdict(sb, user_id, env_name)
-        if reason:
-            return _no(action, reason, email)
+        features = _features(sb, user_id)
+        if "enterprise" in features:
+            plan_name, end_at = "Enterprise", None
+        else:
+            reason, plan_name, end_at = _subscription_verdict(sb, user_id, env_name)
+            if reason:
+                return _no(action, reason, email)
 
         claim = sb.rpc(
             "claim_license_device",
@@ -288,7 +341,7 @@ def lambda_handler(event, context):
         print(f"license: backend error {type(e).__name__}: {e}")
         return _resp(503, {"error": "service_unavailable", "message": "license service temporarily unavailable"})
 
-    print(f"license: action=activate allowed=true claim={status} license_id={license_id}")
+    print(f"license: action=activate allowed=true claim={status} license_id={license_id} features={','.join(features)}")
     out = {
         "allowed": True,
         "email": email,
@@ -302,4 +355,4 @@ def lambda_handler(event, context):
     token = _activation_token(license_id, device_id)
     if token:
         out["activation_token"] = token
-    return _resp(200, out)
+    return _resp(200, _with_features(out, license_id, device_id, features))
